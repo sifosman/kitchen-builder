@@ -333,15 +333,24 @@ export default function KitchenScene3D() {
   const ceilH = mm(room.ceilingHeightMm)
   const controlsRef = useRef<any>(null)
 
-  // countertop spans: contiguous run of base-mounted units per wall
+  // countertop spans: contiguous runs of base-mounted units per wall —
+  // a gap wider than 60mm breaks the slab instead of floating over air
   const counters = useMemo(() => {
     const perWall: Array<{ wallIndex: number; s: number; e: number }> = []
     room.walls.forEach((_, wi) => {
-      const base = units.filter(u => u.wallId === room.walls[wi].id && u.mounted === 'base')
-      if (base.length === 0) return
-      const s = Math.min(...base.map(u => u.startMm))
-      const e = Math.max(...base.map(u => u.startMm + u.widthMm))
-      perWall.push({ wallIndex: wi, s, e })
+      const base = units
+        .filter(u => u.wallId === room.walls[wi].id && (u.mounted === 'base' || u.kind === 'dishwasher'))
+        .sort((a, b) => a.startMm - b.startMm)
+      let cur: { s: number; e: number } | null = null
+      for (const u of base) {
+        if (cur && u.startMm - cur.e > 60) {
+          perWall.push({ wallIndex: wi, ...cur })
+          cur = null
+        }
+        if (!cur) cur = { s: u.startMm, e: u.startMm + u.widthMm }
+        else cur.e = Math.max(cur.e, u.startMm + u.widthMm)
+      }
+      if (cur) perWall.push({ wallIndex: wi, ...cur })
     })
     return perWall
   }, [units, room])

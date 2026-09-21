@@ -90,28 +90,76 @@ function staleQuote(q: KitchenState['quote']): KitchenState['quote'] {
 }
 
 /**
- * The legal interval [lo, hi) for a unit on its wall: the obstruction-free
- * span it's in, clipped by same-band neighbours and the corner dead zone on
- * secondary walls. Edits (move/resize/swap) clamp to this so a cabinet can
- * never be dragged over an appliance, door or the corner.
+ * Free intervals for one mount band on a wall: obstruction-free spans minus
+ * the zones appliances reserve at that level (wall units can't hang over the
+ * fridge, a tall unit, or the hob's extractor zone; floor units can't sit on
+ * plumbing/hob/fridge/dishwasher markings), clipped to the corner dead zone
+ * on secondary walls. `kind` is the unit being placed — a sink is allowed on
+ * its plumbing, an oven on its hob zone.
+ */
+function bandIntervals(
+  units: PlacedUnit[],
+  room: RoomSpec,
+  wallId: string,
+  isWallBand: boolean,
+  kind?: PlacedUnit['kind'],
+): { s: number; e: number }[] {
+  const wi = room.walls.findIndex(w => w.id === wallId)
+  const wall = room.walls[wi]
+  if (!wall) return []
+  const dead = wi > 0 ? (isWallBand ? CORNER_DEAD_WALL_MM : CORNER_DEAD_BASE_MM) : 0
+  let spans = freeSpans(wall, isWallBand).map(s => ({ s: Math.max(s.startMm, dead), e: s.endMm }))
+
+  const blocks: { s: number; e: number }[] = []
+  if (isWallBand) {
+    for (const o of wall.obstructions) {
+      if (o.kind === 'fridge' || o.kind === 'dishwasher') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
+      else if (o.kind === 'hob') blocks.push({ s: o.offsetMm - 50, e: o.offsetMm + o.widthMm + 50 })
+    }
+    for (const u of units) {
+      if (u.wallId !== wallId) continue
+      if (u.mounted === 'tall' || u.kind === 'fridge') blocks.push({ s: u.startMm, e: u.startMm + u.widthMm })
+    }
+  } else {
+    for (const o of wall.obstructions) {
+      if (o.kind === 'plumbing' && kind !== 'sink') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
+      else if (o.kind === 'hob' && kind !== 'oven' && kind !== 'hob') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
+      else if (o.kind === 'fridge' && kind !== 'fridge') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
+      else if (o.kind === 'dishwasher' && kind !== 'dishwasher') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
+    }
+  }
+  for (const b of blocks) {
+    spans = spans.flatMap(sp => {
+      if (b.e <= sp.s || b.s >= sp.e) return [sp]
+      const out: { s: number; e: number }[] = []
+      if (b.s > sp.s) out.push({ s: sp.s, e: b.s })
+      if (b.e < sp.e) out.push({ s: b.e, e: sp.e })
+      return out
+    })
+  }
+  return spans.filter(sp => sp.e - sp.s > 0)
+}
+
+/**
+ * The legal interval [lo, hi) for a unit on its wall: the free span it's in,
+ * clipped by same-band neighbours. Edits (move/resize/swap) clamp to this so
+ * a cabinet can never be dragged over an appliance, door or the corner.
  */
 function freeInterval(units: PlacedUnit[], room: RoomSpec, u: PlacedUnit): { lo: number; hi: number } {
-  const wi = room.walls.findIndex(w => w.id === u.wallId)
-  const wall = room.walls[wi]
-  if (!wall) return { lo: u.startMm, hi: u.startMm + u.widthMm }
   const isWallBand = u.mounted === 'wall'
-  const span = freeSpans(wall, isWallBand).find(
-    s => u.startMm >= s.startMm && u.startMm + u.widthMm <= s.endMm,
-  ) ?? freeSpans(wall, isWallBand).find(s => u.startMm < s.endMm && s.startMm < u.startMm + u.widthMm)
-  let lo = span?.startMm ?? 0
-  let hi = span?.endMm ?? wall.lengthMm
-  if (wi > 0) lo = Math.max(lo, isWallBand ? CORNER_DEAD_WALL_MM : CORNER_DEAD_BASE_MM)
+  const spans = bandIntervals(units, room, u.wallId, isWallBand, u.kind)
+  const uEnd = u.startMm + u.widthMm
+  const span =
+    spans.find(s => u.startMm >= s.s && uEnd <= s.e) ??
+    spans.find(s => u.startMm < s.e && s.s < uEnd)
+  let lo = span?.s ?? u.startMm
+  let hi = span?.e ?? uEnd
   for (const n of units) {
     if (n.instanceId === u.instanceId || n.wallId !== u.wallId || (n.mounted === 'wall') !== isWallBand) continue
     if (n.startMm + n.widthMm <= u.startMm) lo = Math.max(lo, n.startMm + n.widthMm)
-    else if (n.startMm >= u.startMm + u.widthMm) hi = Math.min(hi, n.startMm)
+    else if (n.startMm >= uEnd) hi = Math.min(hi, n.startMm)
   }
-  return { lo, hi }
+  return { lo: Math.min(lo, u.startMm), hi: Math.max(hi, uEnd) }
 }
 
 export const useStore = create<KitchenState>((set, get) => ({
@@ -223,23 +271,21 @@ export const useStore = create<KitchenState>((set, get) => ({
     const wi = room.walls.findIndex(w => w.id === wallId)
     const wall = room.walls[wi]
     if (!wall) return
-    // first free slot: obstruction-free span ∩ gap between same-band units,
-    // never inside the corner dead zone on a secondary wall
+    // first free slot: free span ∩ gap between same-band units — never over
+    // an appliance, obstruction or the corner dead zone
     const isWallBand = m.kind === 'wall'
-    const dead = wi > 0 ? (isWallBand ? CORNER_DEAD_WALL_MM : CORNER_DEAD_BASE_MM) : 0
     const onWall = units
       .filter(u => u.wallId === wallId && (u.mounted === 'wall') === isWallBand)
       .sort((a, b) => a.startMm - b.startMm)
     let x: number | undefined
-    for (const sp of freeSpans(wall, isWallBand)) {
-      const e = sp.endMm
-      let cursor = Math.max(sp.startMm, dead)
+    for (const sp of bandIntervals(units, room, wallId, isWallBand, m.kind)) {
+      let cursor = sp.s
       for (const u of onWall) {
-        if (u.startMm + u.widthMm <= cursor || u.startMm >= e) continue
+        if (u.startMm + u.widthMm <= cursor || u.startMm >= sp.e) continue
         if (u.startMm >= cursor + m.widthMm) break
         cursor = u.startMm + u.widthMm
       }
-      if (e - cursor >= m.widthMm) {
+      if (sp.e - cursor >= m.widthMm) {
         x = cursor
         break
       }

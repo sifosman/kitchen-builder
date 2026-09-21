@@ -32,6 +32,34 @@ describe('manual edit clamping', () => {
     expect(after.startMm + after.widthMm).toBeLessThanOrEqual(b.startMm)
   })
 
+  it('a wall unit can never be added or nudged over the fridge', () => {
+    const s = useStore.getState()
+    const fridge = s.units.find(u => u.kind === 'fridge')!
+    // try to add a wall unit — first free wall-band slot must be clear of the fridge zone
+    useStore.getState().addUnit('W600', 'A')
+    const added = useStore.getState().units.find(u => u.mounted === 'wall' && u.instanceId.includes('M'))
+    if (added) {
+      expect(added.startMm >= fridge.startMm + fridge.widthMm || added.startMm + added.widthMm <= fridge.startMm).toBe(true)
+    }
+    // and nudging any wall unit left can't slide it over the fridge
+    const w = useStore.getState().units.find(u => u.mounted === 'wall' && u.wallId === 'A')!
+    for (let i = 0; i < 30; i++) useStore.getState().nudgeUnit(w.instanceId, -100)
+    const moved = useStore.getState().units.find(u => u.instanceId === w.instanceId)!
+    expect(moved.startMm >= fridge.startMm + fridge.widthMm || moved.startMm + moved.widthMm <= fridge.startMm).toBe(true)
+  })
+
+  it('a base cabinet can never slide onto the hob zone', () => {
+    const s = useStore.getState()
+    const oven = s.units.find(u => u.kind === 'oven')!
+    const bases = s.units.filter(u => u.mounted === 'base' && u.kind === 'base')
+    for (const b of bases) {
+      for (let i = 0; i < 40; i++) useStore.getState().nudgeUnit(b.instanceId, 100)
+      for (let i = 0; i < 40; i++) useStore.getState().nudgeUnit(b.instanceId, -100)
+      const moved = useStore.getState().units.find(u => u.instanceId === b.instanceId)!
+      expect(moved.startMm >= oven.startMm + oven.widthMm || moved.startMm + moved.widthMm <= oven.startMm).toBe(true)
+    }
+  })
+
   it('addUnit never lands inside a door zone', () => {
     useStore.getState().resetDesign()
     useStore.getState().setRoom({
