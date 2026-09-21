@@ -12,8 +12,8 @@ body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 15.5px;
-  background-color: #f6f4f0;
-  color: #141414;
+  background-color: #e9e4dc;
+  color: #111111;
 }
 
 @layer components {

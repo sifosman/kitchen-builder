@@ -7,12 +7,12 @@ export default {
         hds: {
           gold: '#FFC400',
           goldHover: '#FFB300',
-          black: '#141414',
-          sand: '#F6F4F0',
+          black: '#111111',
+          sand: '#E9E4DC',
           card: '#FFFFFF',
-          muted: '#6B6B6B',
-          border: '#E6E2DA',
-          wall: '#EFEBE4',
+          muted: '#5A5A5A',
+          border: '#D6D0C6',
+          wall: '#E3DDD3',
         },
       },
       boxShadow: {

@@ -119,7 +119,7 @@ export default function App() {
         {/* step panel — floating card on lg, bottom sheet on mobile */}
         <div
           ref={panelRef}
-          className="min-h-0 flex-1 overflow-y-auto border-t border-hds-border bg-white lg:absolute lg:bottom-6 lg:left-6 lg:top-6 lg:w-[400px] lg:flex-none lg:rounded-2xl lg:border lg:shadow-float"
+          className="min-h-0 flex-1 overflow-y-auto border-t-4 border-t-hds-gold border-hds-border bg-white lg:absolute lg:bottom-6 lg:left-6 lg:top-6 lg:w-[400px] lg:flex-none lg:rounded-2xl lg:border lg:border-t-4 lg:border-t-hds-gold lg:shadow-float"
         >
           <div className="p-6 pb-32 lg:pb-6">
             <StepPanel step={step} />
@@ -127,7 +127,7 @@ export default function App() {
         </div>
 
         {/* price bar — floating bottom-right on lg, sticky bottom on mobile */}
-        <div className="border-t border-hds-border bg-white p-3 lg:pointer-events-none lg:absolute lg:bottom-6 lg:right-6 lg:border-0 lg:bg-transparent lg:p-0">
+        <div className="bg-hds-sand p-3 lg:pointer-events-none lg:absolute lg:bottom-6 lg:right-6 lg:bg-transparent lg:p-0">
           <PricePanel />
         </div>
       </div>

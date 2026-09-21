@@ -1,33 +1,66 @@
-import { useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { ContactShadows, Edges, Environment, OrbitControls, RoundedBox, useTexture } from '@react-three/drei'
+import { ContactShadows, Edges, OrbitControls, RoundedBox } from '@react-three/drei'
 import * as THREE from 'three'
 import { useStore } from '../store'
 import { getModule } from '../data/cabinetLibrary'
 import { findDoorMaterial } from '../data/boardMaterials'
+import SceneErrorBoundary from './SceneErrorBoundary'
 import type { PlacedUnit } from '../engine/rules'
 import type { BoardMaterial } from '../data/boardMaterials'
 
 const mm = (v: number) => v / 1000
 const GOLD = '#FFC400'
 
+// Texture cache — a failed load resolves to null (flat-colour fallback),
+// never throws, so the scene can never be taken down by a missing image.
+const textureCache = new Map<string, THREE.Texture | null>()
+
+function useSafeTexture(url: string | null): THREE.Texture | null {
+  const [tex, setTex] = useState<THREE.Texture | null>(() => (url ? textureCache.get(url) ?? null : null))
+  useEffect(() => {
+    if (!url) {
+      setTex(null)
+      return
+    }
+    const cached = textureCache.get(url)
+    if (cached !== undefined) {
+      setTex(cached)
+      return
+    }
+    let cancelled = false
+    new THREE.TextureLoader().load(
+      url,
+      t => {
+        t.colorSpace = THREE.SRGBColorSpace
+        t.anisotropy = 8
+        textureCache.set(url, t)
+        if (!cancelled) setTex(t)
+      },
+      undefined,
+      () => {
+        textureCache.set(url, null)
+        if (!cancelled) setTex(null)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [url])
+  return tex
+}
+
 // Door-material mesh builder — real board texture when a crop exists.
 function useBoardMaterial(mat: BoardMaterial | undefined) {
   const url = mat?.renderTexture || null
-  // useTexture requires a stable URL — use a 1px fallback when none exists
-  const texture = useTexture(url || '/images/cabinet-crops/iceland-gloss-door.png')
+  const texture = useSafeTexture(url)
   return useMemo(() => {
     const isGloss = mat?.texture === 'gloss'
     const isMatt = mat?.texture === 'matt' || mat?.texture === 'super-matte'
-    let map: THREE.Texture | null = null
-    if (url && texture?.image) {
-      map = texture
-      map.colorSpace = THREE.SRGBColorSpace
-      map.anisotropy = 8
-    }
+    const map = url && texture?.image ? texture : null
     const color = map ? new THREE.Color('#ffffff') : new THREE.Color(mat?.hex || '#cccccc')
     if (isGloss) {
-      return new THREE.MeshPhysicalMaterial({ color, map, roughness: 0.4, clearcoat: 0.25, clearcoatRoughness: 0.3, envMapIntensity: 0.5 })
+      return new THREE.MeshPhysicalMaterial({ color, map, roughness: 0.3, clearcoat: 0.4, clearcoatRoughness: 0.3 })
     }
     if (isMatt) {
       return new THREE.MeshStandardMaterial({ color, map, roughness: 0.9, metalness: 0.02 })
@@ -81,10 +114,11 @@ function CabinetMesh({ unit, doorMat, selected, onSelect }: CabinetMeshProps) {
   const m = getModule(unit.moduleId)
   const frontMat = useBoardMaterial(doorMat)
   const cursor = usePointerCursor()
-  const carcassMat = useMemo(
-    () => new THREE.MeshStandardMaterial({ color: '#FBFAF7', roughness: 0.8 }),
-    [],
-  )
+  const carcassMat = useMemo(() => {
+    // a shade darker than the door colour so the cabinet edges read
+    const c = new THREE.Color(doorMat?.hex || '#F7F7F5').multiplyScalar(0.92)
+    return new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 })
+  }, [doorMat])
   const w = mm(unit.widthMm)
   const h = mm(m.heightMm)
   const d = mm(m.depthMm)
@@ -226,7 +260,7 @@ function WallMesh({ lengthM, heightM, position, rotY }: { lengthM: number; heigh
   return (
     <mesh position={position} rotation={[0, rotY, 0]} receiveShadow>
       <boxGeometry args={[lengthM, heightM, 0.1]} />
-      <meshStandardMaterial color="#EFEBE4" roughness={0.95} />
+      <meshStandardMaterial color="#E3DDD3" roughness={0.95} />
     </mesh>
   )
 }
@@ -281,7 +315,7 @@ function ObstructionMesh({ kind, offsetMm, widthMm, wallIndex, wallALenM, sillHe
 
 function Floor({ sizeX, sizeZ }: { sizeX: number; sizeZ: number }) {
   const mat = useMemo(
-    () => new THREE.MeshStandardMaterial({ color: '#D5C4A5', roughness: 0.85 }),
+    () => new THREE.MeshStandardMaterial({ color: '#B39A73', roughness: 0.85 }),
     [],
   )
   return (
@@ -318,18 +352,20 @@ export default function KitchenScene3D() {
 
   return (
     <div className="relative h-full w-full">
+      <SceneErrorBoundary>
       <Canvas shadows camera={{ position: [roomSizeX / 2 + 1.2, 3.0, camDist], fov: 42 }} onPointerMissed={() => selectUnit(null)}>
-        <color attach="background" args={['#F6F4F0']} />
-        <fog attach="fog" args={['#F6F4F0', 8, 22]} />
-        <ambientLight intensity={0.4} />
+        <color attach="background" args={['#D8D1C6']} />
+        <fog attach="fog" args={['#D8D1C6', 10, 26]} />
+        <hemisphereLight args={['#ffffff', '#c8bfae', 0.55]} />
+        <ambientLight intensity={0.35} />
         <directionalLight
-          position={[roomSizeX / 2 + 2, 5.5, roomSizeZ + 3.5]}
-          intensity={1.2}
+          position={[roomSizeX / 2 + 4, 6, roomSizeZ + 5]}
+          intensity={1.4}
           castShadow
           shadow-mapSize={[2048, 2048]}
-          shadow-bias={-0.0002}
+          shadow-bias={-0.0004}
         />
-        <Environment preset="apartment" />
+        <directionalLight position={[-4, 3, -2]} intensity={0.4} />
 
         <Floor sizeX={roomSizeX} sizeZ={roomSizeZ} />
 
@@ -409,6 +445,7 @@ export default function KitchenScene3D() {
           enablePan={isDesktop}
         />
       </Canvas>
+      </SceneErrorBoundary>
 
       {units.length === 0 && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2">
