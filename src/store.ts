@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { RoomSpec, Obstruction } from './engine/room'
-import type { PlacedUnit } from './engine/rules'
+import { freeSpans, type RoomSpec, type Obstruction } from './engine/room'
+import { CORNER_DEAD_BASE_MM, CORNER_DEAD_WALL_MM, type PlacedUnit } from './engine/rules'
 import { proposeLayouts, type Proposal } from './engine/propose'
 import { buildBom, type Bom } from './engine/bom'
 import { priceKitchen, type PriceBreakdown, type Tier } from './engine/pricing'
@@ -89,6 +89,31 @@ function staleQuote(q: KitchenState['quote']): KitchenState['quote'] {
   return q
 }
 
+/**
+ * The legal interval [lo, hi) for a unit on its wall: the obstruction-free
+ * span it's in, clipped by same-band neighbours and the corner dead zone on
+ * secondary walls. Edits (move/resize/swap) clamp to this so a cabinet can
+ * never be dragged over an appliance, door or the corner.
+ */
+function freeInterval(units: PlacedUnit[], room: RoomSpec, u: PlacedUnit): { lo: number; hi: number } {
+  const wi = room.walls.findIndex(w => w.id === u.wallId)
+  const wall = room.walls[wi]
+  if (!wall) return { lo: u.startMm, hi: u.startMm + u.widthMm }
+  const isWallBand = u.mounted === 'wall'
+  const span = freeSpans(wall, isWallBand).find(
+    s => u.startMm >= s.startMm && u.startMm + u.widthMm <= s.endMm,
+  ) ?? freeSpans(wall, isWallBand).find(s => u.startMm < s.endMm && s.startMm < u.startMm + u.widthMm)
+  let lo = span?.startMm ?? 0
+  let hi = span?.endMm ?? wall.lengthMm
+  if (wi > 0) lo = Math.max(lo, isWallBand ? CORNER_DEAD_WALL_MM : CORNER_DEAD_BASE_MM)
+  for (const n of units) {
+    if (n.instanceId === u.instanceId || n.wallId !== u.wallId || (n.mounted === 'wall') !== isWallBand) continue
+    if (n.startMm + n.widthMm <= u.startMm) lo = Math.max(lo, n.startMm + n.widthMm)
+    else if (n.startMm >= u.startMm + u.widthMm) hi = Math.min(hi, n.startMm)
+  }
+  return { lo, hi }
+}
+
 export const useStore = create<KitchenState>((set, get) => ({
   room: defaultRoom,
   step: 'room',
@@ -138,11 +163,20 @@ export const useStore = create<KitchenState>((set, get) => ({
   selectUnit: id => set({ selectedUnitId: id }),
 
   swapUnitModule: (instanceId, moduleId) => {
-    const { units, tier, doorMaterialId } = get()
+    const { units, tier, doorMaterialId, room } = get()
+    const target = units.find(u => u.instanceId === instanceId)
+    if (!target) return
+    const m = getModule(moduleId)
+    // don't let a wider module swallow the neighbour — clamp to free space
+    const avail = freeInterval(units, room, target).hi - target.startMm
+    if (m.widthMm > avail) {
+      if (!['base', 'drawer', 'wall', 'tall'].includes(m.kind) || avail < 300) return
+      moduleId = moduleIdFor(m.kind as 'base' | 'drawer' | 'wall' | 'tall', avail)
+    }
+    const mod = getModule(moduleId)
     const next = units.map(u => {
       if (u.instanceId !== instanceId) return u
-      const m = getModule(moduleId)
-      return { ...u, moduleId, widthMm: m.widthMm, kind: m.kind, mounted: (m.kind === 'wall' ? 'wall' : m.kind === 'tall' ? 'tall' : u.mounted) as PlacedUnit['mounted'] }
+      return { ...u, moduleId, widthMm: mod.widthMm, kind: mod.kind, mounted: (mod.kind === 'wall' ? 'wall' : mod.kind === 'tall' ? 'tall' : u.mounted) as PlacedUnit['mounted'] }
     })
     const { bom, estimate, nest } = recalc(next, tier, doorMaterialId)
     set({ units: next, bom, estimate, nest, quote: staleQuote(get().quote) })
@@ -150,23 +184,26 @@ export const useStore = create<KitchenState>((set, get) => ({
 
   nudgeUnit: (instanceId, deltaMm) => {
     const { units, room } = get()
-    const wall = room.walls.find(w => w.id === units.find(u => u.instanceId === instanceId)?.wallId)
-    if (!wall) return
-    const next = units.map(u => {
-      if (u.instanceId !== instanceId) return u
-      const start = Math.max(0, Math.min(wall.lengthMm - u.widthMm, u.startMm + deltaMm))
-      return { ...u, startMm: Math.round(start) }
-    })
+    const unit = units.find(u => u.instanceId === instanceId)
+    if (!unit) return
+    const { lo, hi } = freeInterval(units, room, unit)
+    const start = Math.max(lo, Math.min(hi - unit.widthMm, unit.startMm + deltaMm))
+    if (start === unit.startMm) return
+    const next = units.map(u => (u.instanceId === instanceId ? { ...u, startMm: Math.round(start) } : u))
     const { bom, estimate, nest } = recalc(next, get().tier, get().doorMaterialId)
     set({ units: next, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   setUnitWidth: (instanceId, widthMm) => {
-    const { units } = get()
+    const { units, room } = get()
+    const target = units.find(u => u.instanceId === instanceId)
+    if (!target || !['base', 'drawer', 'wall', 'tall'].includes(target.kind)) return
+    const maxW = freeInterval(units, room, target).hi - target.startMm
+    const w = Math.min(widthMm, Math.floor(maxW))
+    if (w < 300) return
     const next = units.map(u => {
       if (u.instanceId !== instanceId) return u
-      if (!['base', 'drawer', 'wall', 'tall'].includes(u.kind)) return u
-      const moduleId = moduleIdFor(u.kind as 'base' | 'drawer' | 'wall' | 'tall', widthMm)
+      const moduleId = moduleIdFor(u.kind as 'base' | 'drawer' | 'wall' | 'tall', w)
       const m = getModule(moduleId)
       return { ...u, moduleId, widthMm: m.widthMm }
     })
@@ -183,16 +220,31 @@ export const useStore = create<KitchenState>((set, get) => ({
   addUnit: (moduleId, wallId) => {
     const { units, room } = get()
     const m = getModule(moduleId)
-    const wall = room.walls.find(w => w.id === wallId)
+    const wi = room.walls.findIndex(w => w.id === wallId)
+    const wall = room.walls[wi]
     if (!wall) return
-    // find first free slot scanning left→right
-    const onWall = units.filter(u => u.wallId === wallId).sort((a, b) => a.startMm - b.startMm)
-    let x = 0
-    for (const u of onWall) {
-      if (u.startMm >= x + m.widthMm) break
-      x = Math.max(x, u.startMm + u.widthMm)
+    // first free slot: obstruction-free span ∩ gap between same-band units,
+    // never inside the corner dead zone on a secondary wall
+    const isWallBand = m.kind === 'wall'
+    const dead = wi > 0 ? (isWallBand ? CORNER_DEAD_WALL_MM : CORNER_DEAD_BASE_MM) : 0
+    const onWall = units
+      .filter(u => u.wallId === wallId && (u.mounted === 'wall') === isWallBand)
+      .sort((a, b) => a.startMm - b.startMm)
+    let x: number | undefined
+    for (const sp of freeSpans(wall, isWallBand)) {
+      const e = sp.endMm
+      let cursor = Math.max(sp.startMm, dead)
+      for (const u of onWall) {
+        if (u.startMm + u.widthMm <= cursor || u.startMm >= e) continue
+        if (u.startMm >= cursor + m.widthMm) break
+        cursor = u.startMm + u.widthMm
+      }
+      if (e - cursor >= m.widthMm) {
+        x = cursor
+        break
+      }
     }
-    if (x + m.widthMm > wall.lengthMm) return // no room
+    if (x === undefined) return // no room
     const nu: PlacedUnit = {
       instanceId: `${wallId}-M${Date.now().toString(36)}`,
       moduleId,

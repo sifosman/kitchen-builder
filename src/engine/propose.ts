@@ -141,9 +141,23 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
   let sinkUnit: PlacedUnit | undefined
 
   // corner dead-space: secondary walls lose the first 610mm (base) / 330mm (wall)
+  const deadBase = wallIndex > 0 ? Math.min(CORNER_DEAD_BASE_MM, wall.lengthMm) : 0
   if (wallIndex > 0) {
-    occupied.push({ s: 0, e: Math.min(CORNER_DEAD_BASE_MM, wall.lengthMm), hard: true })
+    occupied.push({ s: 0, e: deadBase, hard: true })
     wallOccupied.push({ s: 0, e: Math.min(CORNER_DEAD_WALL_MM, wall.lengthMm), hard: true })
+  }
+  // floor-level fixed items must sit clear of the corner dead zone
+  const clampFloor = (start: number, w: number) =>
+    Math.min(Math.max(start, deadBase), Math.max(deadBase, wall.lengthMm - w))
+  // footprints of fixed units already placed — a later appliance whose marked
+  // zone overlaps a placed unit slides right past it instead of colliding
+  const claimed: Zone[] = []
+  const resolveStart = (start: number, w: number): number => {
+    let s = start
+    for (const c of [...claimed].sort((a, b) => a.s - b.s)) {
+      if (s < c.e && c.s < s + w) s = c.e
+    }
+    return s
   }
 
   const pendingDishwashers: Array<{ offsetMm: number; widthMm: number }> = []
@@ -166,29 +180,35 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
       }
       case 'fridge': {
         const moduleId = pickFridgeModule(o.widthMm)
-        const u = unit(moduleId, wall.id, s)
+        const u = unit(moduleId, wall.id, resolveStart(clampFloor(s, getModule(moduleId).widthMm), getModule(moduleId).widthMm))
         fixed.push(u)
-        occupied.push({ s: s - FRIDGE_VENT_MM, e: e + FRIDGE_VENT_MM, hard: true })
-        wallOccupied.push({ s, e, hard: true }) // no wall units over the fridge slot either
+        const uEnd = u.startMm + u.widthMm
+        claimed.push({ s: u.startMm, e: uEnd })
+        // the reserved zone must cover the unit wherever it actually landed
+        occupied.push({ s: Math.min(s, u.startMm) - FRIDGE_VENT_MM, e: Math.max(e, uEnd) + FRIDGE_VENT_MM, hard: true })
+        wallOccupied.push({ s: Math.min(s, u.startMm), e: Math.max(e, uEnd), hard: true }) // no wall units over the fridge slot either
         break
       }
       case 'hob': {
         const w = Math.max(600, o.widthMm)
-        const start = Math.max(0, Math.min(wall.lengthMm - w, s + (o.widthMm - w) / 2))
-        // oven unit itself stays 600 — centred inside wider zones
-        const unitStart = start + Math.max(0, (w - 600) / 2)
+        const start = clampFloor(Math.min(wall.lengthMm - w, s + (o.widthMm - w) / 2), w)
+        // oven unit itself stays 600 — centred inside wider zones, but never
+        // inside another fixed unit's footprint
+        const unitStart = Math.min(resolveStart(start + Math.max(0, (w - 600) / 2), 600), Math.max(deadBase, wall.lengthMm - 600))
         const u = unit('OVEN600', wall.id, unitStart, 600, 'oven')
         fixed.push(u)
-        occupied.push({ s: start, e: start + w, hard: false })
-        wallOccupied.push({ s: start - 50, e: start + w + 50, hard: false }) // extractor zone
+        claimed.push({ s: u.startMm, e: u.startMm + u.widthMm })
+        occupied.push({ s: start, e: Math.max(start + w, u.startMm + u.widthMm), hard: false })
+        wallOccupied.push({ s: start - 50, e: Math.max(start + w, u.startMm + u.widthMm) + 50, hard: false }) // extractor zone
         break
       }
       case 'plumbing': {
         const w = pickSinkWidth(o.widthMm)
         const centre = s + o.widthMm / 2
-        const start = Math.max(0, Math.min(wall.lengthMm - w, centre - w / 2))
+        const start = resolveStart(clampFloor(Math.min(wall.lengthMm - w, centre - w / 2), w), w)
         sinkUnit = unit(`SINK${w === 1000 ? 1000 : w}`, wall.id, start)
         fixed.push(sinkUnit)
+        claimed.push({ s: start, e: start + w })
         occupied.push({ s: start, e: start + w, hard: false })
         break
       }
@@ -212,11 +232,13 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
       else if (free(left, left + w)) start = left
     }
     if (start === undefined) {
-      start = Math.max(0, Math.min(wall.lengthMm - w, dw.offsetMm))
+      start = clampFloor(Math.min(wall.lengthMm - w, dw.offsetMm), w)
       if (mergeZones(occupied).some(z => start! < z.e && z.s < start! + w)) continue // can't place
     }
     const unitStart = start + Math.max(0, (w - 600) / 2)
-    fixed.push(unit('DW600', wall.id, unitStart, 600, 'dishwasher'))
+    const dwUnit = unit('DW600', wall.id, unitStart, 600, 'dishwasher')
+    fixed.push(dwUnit)
+    claimed.push({ s: dwUnit.startMm, e: dwUnit.startMm + dwUnit.widthMm })
     occupied.push({ s: start, e: start + w, hard: false })
     wallOccupied.push({ s: start, e: start + w, hard: false })
   }

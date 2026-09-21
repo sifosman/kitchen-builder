@@ -139,6 +139,20 @@ export function validateLayout(units: PlacedUnit[], room: RoomSpec): string[] {
     }
   }
 
+  // corner dead zone: secondary walls cede the first 610mm (floor) /
+  // 330mm (wall units) so the neighbouring wall's run fits the corner
+  room.walls.forEach((wall, wi) => {
+    if (wi === 0) return
+    const deadBase = Math.min(CORNER_DEAD_BASE_MM, wall.lengthMm)
+    const deadWall = Math.min(CORNER_DEAD_WALL_MM, wall.lengthMm)
+    for (const u of units.filter(u => u.wallId === wall.id)) {
+      const limit = u.mounted === 'wall' ? deadWall : deadBase
+      if (u.startMm < limit) {
+        violations.push(`${u.instanceId} (${u.moduleId}): inside corner dead zone on wall ${wall.id}`)
+      }
+    }
+  })
+
   // sink must be centred (±150mm) on the plumbing obstruction
   for (const wall of room.walls) {
     const plumbing = wall.obstructions.filter(o => o.kind === 'plumbing')
