@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useStore } from '../store'
-import { DOOR_MATERIALS } from '../data/boardMaterials'
+import { DOOR_MATERIALS, type BoardMaterial } from '../data/boardMaterials'
 import { buildBom } from '../engine/bom'
 import { priceKitchen, type Tier } from '../engine/pricing'
 
 const fmt = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`
+
+const isWoodgrain = (m: BoardMaterial) =>
+  m.texture === 'woodgrain' || (m.texture === 'gloss' && /oak|driftwood|cherry/i.test(m.name))
 
 const TIERS: { id: Tier; label: string; blurb: string }[] = [
   { id: 'value', label: 'Value', blurb: 'Melamine doors, standard hinges & runners' },
@@ -65,30 +68,40 @@ export default function StyleStep() {
 
       <div>
         <p className="mb-2 text-sm font-medium text-hds-black">Door colour</p>
-        <div className="grid grid-cols-3 gap-3">
-          {materials.map(m => {
-            const selected = doorMaterialId === m.id
-            return (
-              <button key={m.id} onClick={() => setDoorMaterial(m.id)} className="group text-left">
-                <span
-                  className={`relative block aspect-square overflow-hidden rounded-xl border-2 transition-colors ${
-                    selected ? 'border-hds-gold ring-2 ring-hds-gold/40' : 'border-hds-border group-hover:border-hds-gold/60'
-                  }`}
-                  style={{ backgroundColor: m.hex }}
-                >
-                  {m.renderTexture && (
-                    <img src={m.renderTexture} alt={m.name} className="h-full w-full object-cover" loading="lazy" />
-                  )}
-                  {selected && (
-                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-hds-gold text-[11px] font-bold text-hds-black">✓</span>
-                  )}
-                </span>
-                <span className="mt-1 block text-xs font-medium text-hds-black">{m.name}</span>
-                <span className="block text-[11px] text-hds-muted">R{m.pricePerSheet}/sheet</span>
-              </button>
-            )
-          })}
-        </div>
+        {([
+          ['Woodgrains', materials.filter(m => isWoodgrain(m))],
+          ['Plain & textured colours', materials.filter(m => !isWoodgrain(m))],
+        ] as const).map(([label, group]) =>
+          group.length === 0 ? null : (
+            <div key={label} className="mb-4">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-hds-muted">{label}</p>
+              <div className="grid grid-cols-3 gap-3">
+                {group.map(m => {
+                  const selected = doorMaterialId === m.id
+                  return (
+                    <button key={m.id} onClick={() => setDoorMaterial(m.id)} className="group text-left">
+                      <span
+                        className={`relative block aspect-square overflow-hidden rounded-xl border-2 transition-colors ${
+                          selected ? 'border-hds-gold ring-2 ring-hds-gold/40' : 'border-hds-border group-hover:border-hds-gold/60'
+                        }`}
+                        style={{ backgroundColor: m.hex }}
+                      >
+                        {m.renderTexture && (
+                          <img src={m.renderTexture} alt={m.name} className="h-full w-full object-cover" loading="lazy" />
+                        )}
+                        {selected && (
+                          <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-hds-gold text-[11px] font-bold text-hds-black">✓</span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-xs font-medium text-hds-black">{m.name}</span>
+                      <span className="block text-[11px] text-hds-muted">R{m.pricePerSheet}/sheet</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ),
+        )}
       </div>
 
       {estimate && (
