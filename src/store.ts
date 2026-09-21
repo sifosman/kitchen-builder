@@ -8,7 +8,14 @@ import { DOOR_MATERIALS, findDoorMaterial } from './data/boardMaterials'
 import { CABINET_LIBRARY, getModule } from './data/cabinetLibrary'
 import type { QuoteResult } from './api/optimizerClient'
 
-export type Step = 'room' | 'layout' | 'quote'
+export type Step = 'room' | 'layout' | 'style' | 'quote'
+
+export const STEPS: { id: Step; n: number; label: string }[] = [
+  { id: 'room', n: 1, label: 'Your room' },
+  { id: 'layout', n: 2, label: 'Your layout' },
+  { id: 'style', n: 3, label: 'Style & finish' },
+  { id: 'quote', n: 4, label: 'Your quote' },
+]
 
 interface KitchenState {
   room: RoomSpec

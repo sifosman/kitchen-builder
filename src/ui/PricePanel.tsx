@@ -1,67 +1,69 @@
+import { useMemo } from 'react'
 import { useStore } from '../store'
 import { DOOR_MATERIALS } from '../data/boardMaterials'
-import type { Tier } from '../engine/pricing'
+import { priceAllTiers, type Tier } from '../engine/pricing'
 
 const fmt = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`
 
-const TIERS: { id: Tier; label: string; blurb: string }[] = [
-  { id: 'value', label: 'Value', blurb: 'Melamine doors, standard hinges & runners' },
-  { id: 'standard', label: 'Standard', blurb: 'Melawood doors, soft-close throughout' },
-  { id: 'premium', label: 'Premium', blurb: 'Gloss / SilkTouch doors, under-mount runners' },
+const TIERS: { id: Tier; label: string }[] = [
+  { id: 'value', label: 'Value' },
+  { id: 'standard', label: 'Standard' },
+  { id: 'premium', label: 'Premium' },
 ]
 
 export default function PricePanel() {
-  const { tier, setTier, doorMaterialId, setDoorMaterial, estimate, bom } = useStore()
-  const materials = DOOR_MATERIALS[tier]
+  const { tier, setTier, bom, units, setStep } = useStore()
+
+  const prices = useMemo(() => {
+    if (!bom || units.length === 0) return null
+    try {
+      return priceAllTiers(bom, {
+        value: DOOR_MATERIALS.value[0],
+        standard: DOOR_MATERIALS.standard[0],
+        premium: DOOR_MATERIALS.premium[0],
+      })
+    } catch {
+      return null
+    }
+  }, [bom, units.length])
+
+  if (!prices) return null
 
   return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Tier</label>
-        <div className="grid grid-cols-3 gap-1">
-          {TIERS.map(t => (
+    <div className="pointer-events-auto w-full rounded-2xl bg-white p-4 shadow-float lg:w-[380px]">
+      <div className="flex gap-2">
+        {TIERS.map(t => {
+          const selected = tier === t.id
+          return (
             <button
               key={t.id}
               onClick={() => setTier(t.id)}
-              className={`px-2 py-2 rounded text-sm font-medium ${tier === t.id ? 'bg-amber-600 text-white' : 'bg-neutral-800 text-gray-300 hover:bg-neutral-700'}`}
+              className={`relative flex-1 rounded-xl border-2 px-2 py-2 text-center transition-colors ${
+                selected ? 'border-hds-gold bg-hds-gold/10' : 'border-hds-border hover:border-hds-gold/60'
+              }`}
             >
-              {t.label}
+              {t.id === 'standard' && (
+                <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-hds-black px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-hds-gold">
+                  Most popular
+                </span>
+              )}
+              <span className={`block text-xs font-medium ${selected ? 'text-hds-black' : 'text-hds-muted'}`}>{t.label}</span>
+              <span className={`block text-sm transition-all ${selected ? 'font-bold text-hds-black' : 'font-medium text-hds-black'}`}>
+                {fmt(prices[t.id].total)}
+              </span>
             </button>
-          ))}
-        </div>
-        <p className="text-xs text-gray-500 mt-1">{TIERS.find(t => t.id === tier)?.blurb}</p>
+          )
+        })}
       </div>
-
-      <div>
-        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Door / front colour</label>
-        <select
-          value={doorMaterialId}
-          onChange={e => setDoorMaterial(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm"
+      <div className="mt-3 flex items-center gap-3">
+        <p className="flex-1 text-[11px] text-hds-muted">incl VAT · estimate</p>
+        <button
+          onClick={() => setStep('quote')}
+          className="rounded-xl bg-hds-gold px-5 py-2.5 text-sm font-semibold text-hds-black transition-colors hover:bg-hds-goldHover"
         >
-          {materials.map(m => (
-            <option key={m.id} value={m.id}>
-              {m.name} — R{m.pricePerSheet}/sheet
-            </option>
-          ))}
-        </select>
+          Get my quote →
+        </button>
       </div>
-
-      {estimate && (
-        <div className="border border-neutral-800 rounded-lg p-3 space-y-1.5 text-sm">
-          <div className="flex justify-between text-gray-400"><span>Carcass board ({estimate.carcassSheets} sheets)</span><span>{fmt(estimate.carcassCost)}</span></div>
-          <div className="flex justify-between text-gray-400"><span>Door board ({estimate.doorSheets} sheets)</span><span>{fmt(estimate.doorCost)}</span></div>
-          <div className="flex justify-between text-gray-400"><span>Backing board ({estimate.backerSheets})</span><span>{fmt(estimate.backerCost)}</span></div>
-          <div className="flex justify-between text-gray-400"><span>Edging ({bom ? (bom.edgingMetres.carcass + bom.edgingMetres.door).toFixed(1) : 0} m)</span><span>{fmt(estimate.edgingCost)}</span></div>
-          <div className="flex justify-between text-gray-400"><span>Hardware</span><span>{fmt(estimate.hardwareCost)}</span></div>
-          <div className="flex justify-between text-gray-400"><span>Cutting</span><span>{fmt(estimate.cuttingCost)}</span></div>
-          <div className="flex justify-between text-gray-400"><span>Assembly & fit</span><span>{fmt(estimate.labourCost)}</span></div>
-          <div className="flex justify-between pt-2 border-t border-neutral-800 font-semibold text-white text-base">
-            <span>Estimated total (VAT incl)</span><span>{fmt(estimate.total)}</span>
-          </div>
-          <p className="text-[11px] text-gray-600">Estimate only — the quote API confirms the authoritative price.</p>
-        </div>
-      )}
     </div>
   )
 }

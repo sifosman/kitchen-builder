@@ -1,14 +1,15 @@
 import { useMemo, useRef, type ReactNode } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, RoundedBox, useTexture } from '@react-three/drei'
+import { ContactShadows, Edges, Environment, OrbitControls, RoundedBox, useTexture } from '@react-three/drei'
 import * as THREE from 'three'
 import { useStore } from '../store'
 import { getModule } from '../data/cabinetLibrary'
-import { findDoorMaterial, CARCASS_BOARD } from '../data/boardMaterials'
+import { findDoorMaterial } from '../data/boardMaterials'
 import type { PlacedUnit } from '../engine/rules'
 import type { BoardMaterial } from '../data/boardMaterials'
 
 const mm = (v: number) => v / 1000
+const GOLD = '#FFC400'
 
 // Door-material mesh builder — real board texture when a crop exists.
 function useBoardMaterial(mat: BoardMaterial | undefined) {
@@ -26,13 +27,25 @@ function useBoardMaterial(mat: BoardMaterial | undefined) {
     }
     const color = map ? new THREE.Color('#ffffff') : new THREE.Color(mat?.hex || '#cccccc')
     if (isGloss) {
-      return new THREE.MeshPhysicalMaterial({ color, map, roughness: 0.4, clearcoat: 0.25, clearcoatRoughness: 0.3, envMapIntensity: 0.15 })
+      return new THREE.MeshPhysicalMaterial({ color, map, roughness: 0.4, clearcoat: 0.25, clearcoatRoughness: 0.3, envMapIntensity: 0.5 })
     }
     if (isMatt) {
       return new THREE.MeshStandardMaterial({ color, map, roughness: 0.9, metalness: 0.02 })
     }
     return new THREE.MeshStandardMaterial({ color, map, roughness: 0.65, metalness: 0.03 })
   }, [mat, texture, url])
+}
+
+function usePointerCursor() {
+  return {
+    onPointerOver: (e: { stopPropagation: () => void }) => {
+      e.stopPropagation()
+      document.body.style.cursor = 'pointer'
+    },
+    onPointerOut: () => {
+      document.body.style.cursor = 'auto'
+    },
+  }
 }
 
 function Handle({ position, direction = 'horizontal', length = 0.26 }: { position: [number, number, number]; direction?: 'horizontal' | 'vertical'; length?: number }) {
@@ -67,8 +80,9 @@ interface CabinetMeshProps {
 function CabinetMesh({ unit, doorMat, selected, onSelect }: CabinetMeshProps) {
   const m = getModule(unit.moduleId)
   const frontMat = useBoardMaterial(doorMat)
+  const cursor = usePointerCursor()
   const carcassMat = useMemo(
-    () => new THREE.MeshStandardMaterial({ color: CARCASS_BOARD.hex, roughness: 0.85 }),
+    () => new THREE.MeshStandardMaterial({ color: '#FBFAF7', roughness: 0.8 }),
     [],
   )
   const w = mm(unit.widthMm)
@@ -78,8 +92,6 @@ function CabinetMesh({ unit, doorMat, selected, onSelect }: CabinetMeshProps) {
   const legH = 0.15
   const bodyY = isWall ? 1.45 + h / 2 : m.kind === 'tall' ? h / 2 : legH + h / 2
   const frontZ = d / 2 + 0.005
-
-  const highlight = selected ? '#f59e0b' : undefined
 
   const doorCount = unit.widthMm <= 600 ? 1 : 2
   const doorW = doorCount === 1 ? w - 0.004 : (w - 0.012) / 2
@@ -136,21 +148,23 @@ function CabinetMesh({ unit, doorMat, selected, onSelect }: CabinetMeshProps) {
   }
 
   return (
-    <group position={[0, bodyY, 0]} onClick={e => { e.stopPropagation(); onSelect() }}>
+    <group position={[0, bodyY, 0]} onClick={e => { e.stopPropagation(); onSelect() }} {...cursor}>
       {/* carcass */}
-      <RoundedBox args={[w, h, d]} radius={0.008} smoothness={2} material={carcassMat} castShadow receiveShadow />
+      <RoundedBox args={[w, h, d]} radius={0.008} smoothness={2} material={carcassMat} castShadow receiveShadow>
+        {selected && <Edges color={GOLD} lineWidth={2} />}
+      </RoundedBox>
       {fronts}
-      {/* legs for floor units */}
+      {/* recessed plinth for floor units */}
       {!isWall && m.kind !== 'tall' && m.kind !== 'filler' && (
-        <mesh position={[0, -h / 2 - legH / 2, 0]}>
-          <boxGeometry args={[w - 0.06, legH, d - 0.08]} />
-          <meshStandardMaterial color="#111111" roughness={0.9} />
+        <mesh position={[0, -h / 2 - legH / 2, -0.025]}>
+          <boxGeometry args={[w - 0.02, legH - 0.02, d - 0.1]} />
+          <meshStandardMaterial color="#2E2E2E" roughness={0.9} />
         </mesh>
       )}
       {selected && (
         <mesh position={[0, 0, 0]}>
           <boxGeometry args={[w + 0.02, h + 0.02, d + 0.02]} />
-          <meshBasicMaterial color={highlight} wireframe transparent opacity={0.6} />
+          <meshBasicMaterial color={GOLD} transparent opacity={0.08} />
         </mesh>
       )}
     </group>
@@ -159,32 +173,38 @@ function CabinetMesh({ unit, doorMat, selected, onSelect }: CabinetMeshProps) {
 
 function ApplianceMesh({ unit, selected, onSelect }: { unit: PlacedUnit; selected: boolean; onSelect: () => void }) {
   const m = getModule(unit.moduleId)
+  const cursor = usePointerCursor()
   const w = mm(unit.widthMm)
   const h = mm(m.heightMm)
   const d = mm(m.depthMm)
   const bodyY = h / 2
-  const color = unit.kind === 'fridge' ? '#9aa0a6' : '#3a3f44'
+  const color = unit.kind === 'fridge' ? '#B9BDC1' : '#4A4F55'
   return (
-    <group position={[0, bodyY, 0]} onClick={e => { e.stopPropagation(); onSelect() }}>
+    <group position={[0, bodyY, 0]} onClick={e => { e.stopPropagation(); onSelect() }} {...cursor}>
       <RoundedBox args={[w, h, d]} radius={0.01} smoothness={2} castShadow receiveShadow>
         <meshStandardMaterial color={color} metalness={0.6} roughness={0.35} />
+        {selected && <Edges color={GOLD} lineWidth={2} />}
       </RoundedBox>
       {unit.kind === 'fridge' && (
-        <mesh position={[0, 0, d / 2 + 0.004]}>
-          <boxGeometry args={[w - 0.02, h - 0.02, 0.01]} />
-          <meshStandardMaterial color="#b8bdc2" metalness={0.7} roughness={0.3} />
-        </mesh>
+        <>
+          {/* freezer-door seam ~1/3 from the top */}
+          <mesh position={[0, h / 2 - h / 3, d / 2 + 0.004]}>
+            <boxGeometry args={[w - 0.02, 0.008, 0.01]} />
+            <meshStandardMaterial color="#7A7E83" metalness={0.6} roughness={0.4} />
+          </mesh>
+          {/* two short vertical handles */}
+          {[-w * 0.28, w * 0.28].map((x, i) => (
+            <mesh key={i} position={[x, h * 0.08, d / 2 + 0.02]}>
+              <cylinderGeometry args={[0.008, 0.008, h * 0.3, 12]} />
+              <meshStandardMaterial color="#8A8E93" metalness={0.9} roughness={0.2} />
+            </mesh>
+          ))}
+        </>
       )}
       {unit.kind === 'dishwasher' && (
         <mesh position={[0, 0, d / 2 + 0.004]}>
           <boxGeometry args={[w - 0.02, h - 0.02, 0.01]} />
-          <meshStandardMaterial color="#565b61" metalness={0.6} roughness={0.4} />
-        </mesh>
-      )}
-      {selected && (
-        <mesh>
-          <boxGeometry args={[w + 0.02, h + 0.02, d + 0.02]} />
-          <meshBasicMaterial color="#f59e0b" wireframe transparent opacity={0.6} />
+          <meshStandardMaterial color="#B9BDC1" metalness={0.6} roughness={0.35} />
         </mesh>
       )}
     </group>
@@ -206,7 +226,7 @@ function WallMesh({ lengthM, heightM, position, rotY }: { lengthM: number; heigh
   return (
     <mesh position={position} rotation={[0, rotY, 0]} receiveShadow>
       <boxGeometry args={[lengthM, heightM, 0.1]} />
-      <meshStandardMaterial color="#d9d5ce" roughness={0.95} />
+      <meshStandardMaterial color="#EFEBE4" roughness={0.95} />
     </mesh>
   )
 }
@@ -217,37 +237,35 @@ function ObstructionMesh({ kind, offsetMm, widthMm, wallIndex, wallALenM, sillHe
   const w = mm(widthMm)
   const s = mm(offsetMm)
   const wallLen = wallALenM
-  // wall-local: x along wall, z=0 at wall face
   let local: [number, number, number] = [0, 0, 0]
   let size: [number, number, number] = [w, 2.2, 0.02]
-  let color = '#f97316'
-  let opacity = 0.35
+  let color = '#C9B08A'
+  let opacity = 0.45
   if (kind === 'door') {
     local = [s + w / 2, 1.05, 0.06]
     size = [w, 2.1, 0.02]
-    color = '#f97316'
-    opacity = 0.4
+    color = '#B9A98C'
+    opacity = 0.5
   } else if (kind === 'window') {
     const sill = mm(sillHeightMm ?? 900)
     const hgt = mm(heightMm ?? 1200)
     local = [s + w / 2, sill + hgt / 2, 0.06]
     size = [w, hgt, 0.02]
-    color = '#7dd3fc'
-    opacity = 0.5
+    color = '#BEE3F8'
+    opacity = 0.65
   } else if (kind === 'block') {
     local = [s + w / 2, 1.2, 0.06]
     size = [w, 2.4, 0.02]
-    color = '#ef4444'
-    opacity = 0.35
+    color = '#D9C9A8'
+    opacity = 0.5
   } else if (kind === 'plumbing') {
     local = [s + w / 2, 0.55, 0.08]
     size = [0.08, 0.06, 0.08]
-    color = '#38bdf8'
+    color = '#7FB5D5'
     opacity = 0.9
   } else {
     return null // fridge/hob/dishwasher render as placed appliance units
   }
-  // map local (x along wall) to world per wall index
   let pos: [number, number, number]
   let rotY = 0
   if (wallIndex === 0) { pos = [local[0], local[1], local[2]]; rotY = 0 }
@@ -261,12 +279,24 @@ function ObstructionMesh({ kind, offsetMm, widthMm, wallIndex, wallALenM, sillHe
   )
 }
 
+function Floor({ sizeX, sizeZ }: { sizeX: number; sizeZ: number }) {
+  const mat = useMemo(
+    () => new THREE.MeshStandardMaterial({ color: '#D5C4A5', roughness: 0.85 }),
+    [],
+  )
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[sizeX / 2, 0, sizeZ / 2]} receiveShadow material={mat}>
+      <planeGeometry args={[sizeX + 8, sizeZ + 8]} />
+    </mesh>
+  )
+}
+
 export default function KitchenScene3D() {
   const { room, units, selectedUnitId, selectUnit, doorMaterialId } = useStore()
   const doorMat = findDoorMaterial(doorMaterialId) ?? undefined
   const wallALen = mm(room.walls[0]?.lengthMm ?? 3600)
   const ceilH = mm(room.ceilingHeightMm)
-  const groupRef = useRef<THREE.Group>(null)
+  const controlsRef = useRef<any>(null)
 
   // countertop spans: contiguous run of base-mounted units per wall
   const counters = useMemo(() => {
@@ -284,20 +314,24 @@ export default function KitchenScene3D() {
   const roomSizeX = wallALen
   const roomSizeZ = Math.max(mm(room.walls[1]?.lengthMm ?? 2400), mm(room.walls[2]?.lengthMm ?? 2400))
   const camDist = Math.max(roomSizeX, roomSizeZ) * 1.35 + 2.5
+  const isDesktop = typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches
 
   return (
-    <Canvas shadows camera={{ position: [roomSizeX / 2 + 1.2, 3.0, camDist], fov: 42 }} onPointerMissed={() => selectUnit(null)}>
-      <color attach="background" args={['#101013']} />
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[roomSizeX / 2, 5, roomSizeZ + 3]} intensity={1.1} castShadow shadow-mapSize={[2048, 2048]} />
-      <pointLight position={[roomSizeX / 2, 2.4, roomSizeZ / 2]} intensity={0.4} color="#fff4e0" />
+    <div className="relative h-full w-full">
+      <Canvas shadows camera={{ position: [roomSizeX / 2 + 1.2, 3.0, camDist], fov: 42 }} onPointerMissed={() => selectUnit(null)}>
+        <color attach="background" args={['#F6F4F0']} />
+        <fog attach="fog" args={['#F6F4F0', 8, 22]} />
+        <ambientLight intensity={0.4} />
+        <directionalLight
+          position={[roomSizeX / 2 + 2, 5.5, roomSizeZ + 3.5]}
+          intensity={1.2}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-bias={-0.0002}
+        />
+        <Environment preset="apartment" />
 
-      <group ref={groupRef}>
-        {/* floor */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[roomSizeX / 2, 0, roomSizeZ / 2]} receiveShadow>
-          <planeGeometry args={[roomSizeX + 2, roomSizeZ + 2]} />
-          <meshStandardMaterial color="#3d3a35" roughness={0.8} />
-        </mesh>
+        <Floor sizeX={roomSizeX} sizeZ={roomSizeZ} />
 
         {/* walls */}
         {room.walls.map((wall, wi) => {
@@ -323,17 +357,18 @@ export default function KitchenScene3D() {
           )),
         )}
 
-        {/* countertops */}
+        {/* worktops — 40mm dark stone slab over each run of base units */}
         {counters.map((c, i) => {
           const s = mm(c.s)
           const len = mm(c.e - c.s)
           const depth = 0.62
           const y = 0.15 + 0.72 + 0.02
+          const mat = <meshStandardMaterial color="#3A3A3A" roughness={0.4} />
           if (c.wallIndex === 0) {
             return (
               <mesh key={i} position={[s + len / 2, y, depth / 2 + 0.03]} castShadow receiveShadow>
                 <boxGeometry args={[len, 0.04, depth]} />
-                <meshStandardMaterial color="#26241f" roughness={0.3} metalness={0.2} />
+                {mat}
               </mesh>
             )
           }
@@ -341,7 +376,7 @@ export default function KitchenScene3D() {
           return (
             <mesh key={i} position={[x, y, s + len / 2]} castShadow receiveShadow>
               <boxGeometry args={[depth, 0.04, len]} />
-              <meshStandardMaterial color="#26241f" roughness={0.3} metalness={0.2} />
+              {mat}
             </mesh>
           )
         })}
@@ -362,9 +397,34 @@ export default function KitchenScene3D() {
             </group>
           )
         })}
-      </group>
 
-      <OrbitControls target={[roomSizeX / 2, 1, roomSizeZ / 2]} maxPolarAngle={Math.PI / 2.05} minDistance={1.5} maxDistance={camDist * 1.6} />
-    </Canvas>
+        <ContactShadows position={[roomSizeX / 2, 0.001, roomSizeZ / 2]} scale={Math.max(roomSizeX, roomSizeZ) + 2} blur={2.4} far={2.5} opacity={0.35} />
+
+        <OrbitControls
+          ref={controlsRef}
+          target={[roomSizeX / 2, 1, roomSizeZ / 2]}
+          maxPolarAngle={Math.PI / 2.05}
+          minDistance={1.5}
+          maxDistance={camDist * 1.6}
+          enablePan={isDesktop}
+        />
+      </Canvas>
+
+      {units.length === 0 && (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2">
+          <p className="whitespace-nowrap rounded-full bg-white/90 px-4 py-2 text-xs text-hds-muted shadow-card lg:text-sm">
+            <span className="hidden lg:inline">Fill in your room on the left to see your kitchen</span>
+            <span className="lg:hidden">Fill in your room below to see your kitchen</span>
+          </p>
+        </div>
+      )}
+
+      <button
+        onClick={() => controlsRef.current?.reset()}
+        className="absolute bottom-16 left-4 rounded-full border border-hds-border bg-white/90 px-4 py-2 text-xs font-medium text-hds-black shadow-card transition-colors hover:bg-white lg:bottom-6 lg:left-[440px]"
+      >
+        Reset view
+      </button>
+    </div>
   )
 }

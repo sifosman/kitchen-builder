@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useStore } from '../store'
 import { CABINET_LIBRARY, getModule } from '../data/cabinetLibrary'
 import { validateLayout } from '../engine/rules'
@@ -16,56 +17,63 @@ const KIND_GROUPS: Record<string, string[]> = {
 }
 
 export default function UnitEditor() {
-  const { units, selectedUnitId, selectUnit, swapUnitModule, nudgeUnit, removeUnit, room, addUnit } = useStore()
+  const { units, selectedUnitId, selectUnit, swapUnitModule, nudgeUnit, removeUnit, room } = useStore()
   const unit = units.find(u => u.instanceId === selectedUnitId)
   const violations = validateLayout(units, room)
 
   return (
     <div className="space-y-3">
       {unit ? (
-        <div className="border border-amber-700/50 rounded-lg p-3 space-y-2">
+        <div className="rounded-xl border-2 border-hds-gold bg-white p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-amber-400">{getModule(unit.moduleId).name}</span>
-            <button onClick={() => selectUnit(null)} className="text-gray-500 hover:text-gray-300 text-xs">close</button>
+            <span className="text-sm font-semibold text-hds-black">{getModule(unit.moduleId).name}</span>
+            <button onClick={() => selectUnit(null)} className="text-xs font-medium text-hds-muted hover:text-hds-black">Done</button>
           </div>
-          <div className="text-xs text-gray-400">
-            Wall {unit.wallId} · starts at {unit.startMm}mm · {unit.widthMm}mm wide
-          </div>
+          <p className="text-xs text-hds-muted">
+            {unit.wallId === 'A' ? 'Back' : unit.wallId === 'B' ? 'Left' : 'Right'} wall · starts at {unit.startMm}mm · {unit.widthMm}mm wide
+          </p>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Swap module</label>
+            <label className="hds-label">Swap unit</label>
             <select
               value={unit.moduleId}
               onChange={e => swapUnitModule(unit.instanceId, e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm"
+              className="hds-input"
             >
               {(KIND_GROUPS[unit.kind] ?? [unit.moduleId]).map(id => (
                 <option key={id} value={id}>{getModule(id).name}</option>
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-1">
-            <label className="text-xs text-gray-500 mr-1">Move</label>
+          <div className="flex items-center gap-1.5">
+            <span className="mr-1 text-xs text-hds-muted">Move</span>
             {[-100, -50, 50, 100].map(d => (
-              <button key={d} onClick={() => nudgeUnit(unit.instanceId, d)} className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-xs">
+              <button
+                key={d}
+                onClick={() => nudgeUnit(unit.instanceId, d)}
+                className="rounded-lg border border-hds-border bg-white px-2.5 py-1.5 text-xs font-medium text-hds-black transition-colors hover:border-hds-gold"
+              >
                 {d > 0 ? `+${d}` : d}
               </button>
             ))}
-            <button onClick={() => removeUnit(unit.instanceId)} className="ml-auto px-2 py-1 bg-red-900/60 hover:bg-red-800 rounded text-xs text-red-200">
-              Delete
+            <button
+              onClick={() => removeUnit(unit.instanceId)}
+              className="ml-auto rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
+            >
+              Remove
             </button>
           </div>
         </div>
       ) : (
-        <div className="border border-neutral-800 rounded-lg p-3">
-          <p className="text-xs text-gray-500 mb-2">Click a unit in the 3D view to edit it, or add one:</p>
+        <div className="rounded-xl border border-hds-border bg-hds-sand/60 p-4">
+          <p className="mb-3 text-sm text-hds-muted">Tap a cabinet in the 3D view to fine-tune it, or add one:</p>
           <AddUnitRow />
         </div>
       )}
 
       {violations.length > 0 && (
-        <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3">
-          <p className="text-xs font-semibold text-red-400 mb-1">Rule violations</p>
-          <ul className="text-xs text-red-300/80 space-y-0.5">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-1 text-sm font-semibold text-amber-800">Heads up — a few things need attention</p>
+          <ul className="space-y-0.5 text-xs text-amber-700">
             {violations.slice(0, 6).map((v, i) => <li key={i}>• {v}</li>)}
             {violations.length > 6 && <li>…and {violations.length - 6} more</li>}
           </ul>
@@ -78,21 +86,23 @@ export default function UnitEditor() {
 function AddUnitRow() {
   const { room, addUnit } = useStore()
   const addable = CABINET_LIBRARY.filter(m => !['fridge', 'hob', 'dishwasher'].includes(m.kind))
+  const [moduleId, setModuleId] = useState(addable[0]?.id ?? '')
+  const [wallId, setWallId] = useState(room.walls[0]?.id ?? '')
+
+  const wallExists = room.walls.some(w => w.id === wallId)
+  const effectiveWall = wallExists ? wallId : (room.walls[0]?.id ?? '')
+
   return (
-    <div className="flex gap-1">
-      <select id="add-module" className="flex-1 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs">
+    <div className="flex gap-2">
+      <select value={moduleId} onChange={e => setModuleId(e.target.value)} className="hds-input flex-1 text-sm">
         {addable.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </select>
-      <select id="add-wall" className="w-20 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs">
+      <select value={effectiveWall} onChange={e => setWallId(e.target.value)} className="hds-input w-24 text-sm">
         {room.walls.map(w => <option key={w.id} value={w.id}>Wall {w.id}</option>)}
       </select>
       <button
-        onClick={() => {
-          const mod = (document.getElementById('add-module') as HTMLSelectElement).value
-          const wall = (document.getElementById('add-wall') as HTMLSelectElement).value
-          addUnit(mod, wall)
-        }}
-        className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs text-white"
+        onClick={() => addUnit(moduleId, effectiveWall)}
+        className="rounded-lg bg-hds-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black"
       >
         Add
       </button>

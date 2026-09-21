@@ -1,85 +1,134 @@
-import { useStore } from './store'
+import { useEffect, useMemo, useRef } from 'react'
+import { useStore, STEPS, type Step } from './store'
+import { DOOR_MATERIALS } from './data/boardMaterials'
+import { priceAllTiers } from './engine/pricing'
 import RoomForm from './ui/RoomForm'
 import KitchenScene3D from './ui/KitchenScene3D'
 import PricePanel from './ui/PricePanel'
 import QuoteSheet from './ui/QuoteSheet'
-import UnitEditor from './ui/UnitEditor'
+import LayoutStep from './ui/LayoutStep'
+import StyleStep from './ui/StyleStep'
+
+const fmt = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`
+
+const STEP_ORDER: Step[] = ['room', 'layout', 'style', 'quote']
+
+function StepPanel({ step }: { step: Step }) {
+  switch (step) {
+    case 'room':
+      return <RoomForm />
+    case 'layout':
+      return <LayoutStep />
+    case 'style':
+      return <StyleStep />
+    case 'quote':
+      return <QuoteSheet />
+  }
+}
 
 export default function App() {
-  const { step, proposals, selectedProposalId, selectProposal, units } = useStore()
+  const { step, setStep, proposals, units, estimate, bom } = useStore()
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    panelRef.current?.scrollTo({ top: 0 })
+  }, [step])
+
+  const currentIdx = STEP_ORDER.indexOf(step)
+  // A step is reachable if it's the room step, or the prerequisites exist.
+  const reachable = (s: Step): boolean => {
+    if (s === 'room') return true
+    if (s === 'layout') return proposals.length > 0 || currentIdx >= 1
+    return units.length > 0 || currentIdx >= STEP_ORDER.indexOf(s)
+  }
+
+  const currentStep = STEPS[currentIdx]
+
+  // Top-bar pill: "From R…" (cheapest tier) while still designing, selected-tier
+  // total once the customer reaches style/quote.
+  const pillTotal = useMemo(() => {
+    if (currentIdx >= 2) return estimate ? { prefix: 'Estimated total', total: estimate.total } : null
+    if (!bom || units.length === 0) return null
+    try {
+      const all = priceAllTiers(bom, {
+        value: DOOR_MATERIALS.value[0],
+        standard: DOOR_MATERIALS.standard[0],
+        premium: DOOR_MATERIALS.premium[0],
+      })
+      return { prefix: 'From', total: Math.min(all.value.total, all.standard.total, all.premium.total) }
+    } catch {
+      return null
+    }
+  }, [bom, units.length, estimate, currentIdx])
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-gray-200">
-      <header className="border-b border-neutral-800 px-5 py-3 flex items-center gap-3">
-        <div className="w-8 h-8 rounded bg-amber-600 flex items-center justify-center font-bold text-white text-sm">H</div>
-        <div>
-          <h1 className="text-base font-semibold text-white leading-tight">HDS Kitchen Builder</h1>
-          <p className="text-xs text-gray-500">Room in → cabinets out → live price → cut list</p>
+    <div className="flex h-screen flex-col bg-hds-sand text-hds-black">
+      {/* top bar */}
+      <header className="flex h-14 shrink-0 items-center gap-4 bg-hds-black px-4 lg:px-6">
+        <div className="flex items-center gap-3">
+          <img src="/images/hds-logo.webp" alt="HDS" className="h-8 w-8 rounded object-contain" />
+          <span className="text-[15px] font-semibold tracking-tight text-white">Kitchen Planner</span>
         </div>
+
+        {/* step progress — full on lg+, compact on mobile */}
+        <nav className="mx-auto hidden items-center gap-1 lg:flex" aria-label="Progress">
+          {STEPS.map((s, i) => {
+            const active = s.id === step
+            const done = i < currentIdx
+            const canClick = reachable(s.id)
+            return (
+              <div key={s.id} className="flex items-center">
+                {i > 0 && <span className={`mx-2 h-px w-8 ${done || active ? 'bg-hds-gold' : 'bg-white/20'}`} />}
+                <button
+                  onClick={() => canClick && setStep(s.id)}
+                  disabled={!canClick}
+                  className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition-colors ${
+                    active
+                      ? 'bg-hds-gold font-semibold text-hds-black'
+                      : canClick
+                        ? 'text-white/80 hover:text-white'
+                        : 'cursor-default text-white/40'
+                  }`}
+                >
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${active ? 'bg-hds-black text-hds-gold' : done ? 'bg-hds-gold/20 text-hds-gold' : 'bg-white/10 text-white/60'}`}>
+                    {done ? '✓' : s.n}
+                  </span>
+                  {s.label}
+                </button>
+              </div>
+            )
+          })}
+        </nav>
+        <div className="mx-auto text-sm text-white/80 lg:hidden">
+          Step {currentStep.n} of 4 · <span className="font-semibold text-white">{currentStep.label}</span>
+        </div>
+
+        {pillTotal && (
+          <div className="hidden rounded-full bg-hds-gold px-4 py-1.5 text-sm font-semibold text-hds-black sm:block">
+            {pillTotal.prefix} {fmt(pillTotal.total)}
+          </div>
+        )}
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr_320px] gap-4 p-4">
-        {/* left: room input + proposals */}
-        <div className="space-y-4">
-          <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-white mb-3">1 · Room</h2>
-            <RoomForm />
-          </section>
-
-          {proposals.length > 0 && (
-            <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-              <h2 className="text-sm font-semibold text-white mb-2">2 · Proposed layouts</h2>
-              <div className="space-y-2">
-                {proposals.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => selectProposal(p.id)}
-                    className={`w-full text-left px-3 py-2 rounded-lg border text-sm ${selectedProposalId === p.id ? 'border-amber-500 bg-amber-950/30' : 'border-neutral-800 bg-neutral-900 hover:border-neutral-600'}`}
-                  >
-                    <div className="flex justify-between">
-                      <span className="font-medium text-gray-200">Layout {p.id.slice(1)}</span>
-                      <span className="text-xs text-gray-500">score {p.score}</span>
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {p.units.filter(u => !['filler', 'fridge', 'hob', 'dishwasher'].includes(u.kind)).length} cabinets
-                      {p.violations.length > 0 && <span className="text-red-400"> · {p.violations.length} violations</span>}
-                    </div>
-                    {p.notes.map((n, i) => <div key={i} className="text-[11px] text-amber-500/80">{n}</div>)}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {step !== 'room' && units.length > 0 && (
-            <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-              <h2 className="text-sm font-semibold text-white mb-2">Edit units</h2>
-              <UnitEditor />
-            </section>
-          )}
+      {/* hero: 3D canvas + floating panel + price bar */}
+      <div className="relative flex flex-1 flex-col overflow-hidden lg:block">
+        <div className="h-[45vh] w-full lg:absolute lg:inset-0 lg:h-auto">
+          <KitchenScene3D />
         </div>
 
-        {/* centre: 3D */}
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden min-h-[540px] lg:min-h-0">
-          {units.length > 0 ? (
-            <KitchenScene3D />
-          ) : (
-            <div className="h-full flex items-center justify-center text-gray-600 text-sm p-8 text-center">
-              Enter the room dimensions on the left and hit <em>Generate layout</em> — the proposed kitchen renders here in 3D.
-            </div>
-          )}
+        {/* step panel — floating card on lg, bottom sheet on mobile */}
+        <div
+          ref={panelRef}
+          className="min-h-0 flex-1 overflow-y-auto border-t border-hds-border bg-white lg:absolute lg:bottom-6 lg:left-6 lg:top-6 lg:w-[400px] lg:flex-none lg:rounded-2xl lg:border lg:shadow-float"
+        >
+          <div className="p-6 pb-32 lg:pb-6">
+            <StepPanel step={step} />
+          </div>
         </div>
 
-        {/* right: price + quote */}
-        <div className="space-y-4">
-          <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-white mb-3">3 · Live price</h2>
-            <PricePanel />
-          </section>
-          <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-white mb-3">4 · Quote & cut list</h2>
-            <QuoteSheet />
-          </section>
+        {/* price bar — floating bottom-right on lg, sticky bottom on mobile */}
+        <div className="border-t border-hds-border bg-white p-3 lg:pointer-events-none lg:absolute lg:bottom-6 lg:right-6 lg:border-0 lg:bg-transparent lg:p-0">
+          <PricePanel />
         </div>
       </div>
     </div>
