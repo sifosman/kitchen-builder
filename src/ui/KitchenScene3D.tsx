@@ -318,9 +318,10 @@ function Floor({ sizeX, sizeZ }: { sizeX: number; sizeZ: number }) {
     () => new THREE.MeshStandardMaterial({ color: '#B39A73', roughness: 0.85 }),
     [],
   )
+  // showroom sweep — floor extends far past the camera and fades into the fog
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[sizeX / 2, 0, sizeZ / 2]} receiveShadow material={mat}>
-      <planeGeometry args={[sizeX + 8, sizeZ + 8]} />
+      <planeGeometry args={[80, 80]} />
     </mesh>
   )
 }
@@ -347,15 +348,21 @@ export default function KitchenScene3D() {
 
   const roomSizeX = wallALen
   const roomSizeZ = Math.max(mm(room.walls[1]?.lengthMm ?? 2400), mm(room.walls[2]?.lengthMm ?? 2400))
-  const camDist = Math.max(roomSizeX, roomSizeZ) * 1.35 + 2.5
   const isDesktop = typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches
+  // hero framing — fill the frame with the run, near eye level, slight angle.
+  // target sits left of centre on desktop so the kitchen lands in the area
+  // clear of the floating step panel.
+  const camDist = (Math.max(roomSizeX * 1.15, roomSizeZ * 1.5) + 0.5) * (isDesktop ? 1 : 1.18)
+  const targetX = roomSizeX / 2 - (isDesktop ? 0.55 : 0)
+  const camPos: [number, number, number] = [targetX + 0.9, 1.85, camDist]
+  const target: [number, number, number] = [targetX, 1.05, 0.4]
 
   return (
     <div className="relative h-full w-full">
       <SceneErrorBoundary>
-      <Canvas shadows camera={{ position: [roomSizeX / 2 + 1.2, 3.0, camDist], fov: 42 }} onPointerMissed={() => selectUnit(null)}>
+      <Canvas shadows camera={{ position: camPos, fov: 42 }} onPointerMissed={() => selectUnit(null)}>
         <color attach="background" args={['#D8D1C6']} />
-        <fog attach="fog" args={['#D8D1C6', 10, 26]} />
+        <fog attach="fog" args={['#D8D1C6', 9, 30]} />
         <hemisphereLight args={['#ffffff', '#c8bfae', 0.55]} />
         <ambientLight intensity={0.35} />
         <directionalLight
@@ -372,7 +379,16 @@ export default function KitchenScene3D() {
         {/* walls */}
         {room.walls.map((wall, wi) => {
           const lenM = mm(wall.lengthMm)
-          if (wi === 0) return <WallMesh key={wall.id} lengthM={lenM} heightM={ceilH} position={[lenM / 2, ceilH / 2, 0]} rotY={0} />
+          if (wi === 0)
+            return (
+              <WallMesh
+                key={wall.id}
+                lengthM={lenM + 1.2}
+                heightM={ceilH + 0.3}
+                position={[lenM / 2, (ceilH + 0.3) / 2, 0]}
+                rotY={0}
+              />
+            )
           if (wi === 1) return <WallMesh key={wall.id} lengthM={lenM} heightM={ceilH} position={[0, ceilH / 2, lenM / 2]} rotY={Math.PI / 2} />
           return <WallMesh key={wall.id} lengthM={lenM} heightM={ceilH} position={[roomSizeX, ceilH / 2, lenM / 2]} rotY={-Math.PI / 2} />
         })}
@@ -438,10 +454,10 @@ export default function KitchenScene3D() {
 
         <OrbitControls
           ref={controlsRef}
-          target={[roomSizeX / 2, 1, roomSizeZ / 2]}
+          target={target}
           maxPolarAngle={Math.PI / 2.05}
-          minDistance={1.5}
-          maxDistance={camDist * 1.6}
+          minDistance={1.2}
+          maxDistance={camDist * 2}
           enablePan={isDesktop}
         />
       </Canvas>
