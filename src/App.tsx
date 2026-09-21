@@ -1,46 +1,69 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, STEPS, type Step } from './store'
 import { DOOR_MATERIALS } from './data/boardMaterials'
 import { priceAllTiers } from './engine/pricing'
 import RoomForm from './ui/RoomForm'
 import KitchenScene3D from './ui/KitchenScene3D'
+import PlanView from './ui/PlanView'
+import ElevationView from './ui/ElevationView'
 import PricePanel from './ui/PricePanel'
 import QuoteSheet from './ui/QuoteSheet'
 import LayoutStep from './ui/LayoutStep'
 import StyleStep from './ui/StyleStep'
+import LabelSheet from './ui/LabelSheet'
 
 const fmt = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`
 
 const STEP_ORDER: Step[] = ['room', 'layout', 'style', 'quote']
+const VIEWS = [
+  { id: '3d', label: '3D' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'elevation', label: 'Elevation' },
+] as const
+type View = (typeof VIEWS)[number]['id']
 
 function StepPanel({ step }: { step: Step }) {
-  switch (step) {
-    case 'room':
-      return <RoomForm />
-    case 'layout':
-      return <LayoutStep />
-    case 'style':
-      return <StyleStep />
-    case 'quote':
-      return <QuoteSheet />
-  }
+  const { setStep } = useStore()
+  const idx = STEP_ORDER.indexOf(step)
+  return (
+    <>
+      {idx > 0 && (
+        <button
+          onClick={() => setStep(STEP_ORDER[idx - 1])}
+          className="mb-4 flex items-center gap-1 text-sm font-medium text-hds-muted transition-colors hover:text-hds-black"
+        >
+          ← Back
+        </button>
+      )}
+      {step === 'room' && <RoomForm />}
+      {step === 'layout' && <LayoutStep />}
+      {step === 'style' && <StyleStep />}
+      {step === 'quote' && <QuoteSheet />}
+    </>
+  )
 }
 
 export default function App() {
+  // printable label sheet lives outside the planner chrome — before any hooks
+  if (new URLSearchParams(window.location.search).get('print') === 'labels') {
+    return <LabelSheet />
+  }
+  return <PlannerApp />
+}
+
+function PlannerApp() {
   const { step, setStep, proposals, units, estimate, bom } = useStore()
   const panelRef = useRef<HTMLDivElement>(null)
+  const [view, setView] = useState<View>('3d')
 
   useEffect(() => {
     panelRef.current?.scrollTo({ top: 0 })
   }, [step])
 
   const currentIdx = STEP_ORDER.indexOf(step)
-  // A step is reachable if it's the room step, or the prerequisites exist.
-  const reachable = (s: Step): boolean => {
-    if (s === 'room') return true
-    if (s === 'layout') return proposals.length > 0 || currentIdx >= 1
-    return units.length > 0 || currentIdx >= STEP_ORDER.indexOf(s)
-  }
+  // a step is clickable once it has data — room always, the rest once a layout exists
+  const reachable = (s: Step): boolean =>
+    s === 'room' || units.length > 0 || (s === 'layout' && proposals.length > 0) || currentIdx >= STEP_ORDER.indexOf(s)
 
   const currentStep = STEPS[currentIdx]
 
@@ -110,10 +133,25 @@ export default function App() {
         )}
       </header>
 
-      {/* hero: 3D canvas + floating panel + price bar */}
+      {/* hero: 3D/Plan/Elevation + floating panel + price bar */}
       <div className="relative flex flex-1 flex-col overflow-hidden lg:block">
-        <div className="h-[45vh] w-full lg:absolute lg:inset-0 lg:h-auto">
-          <KitchenScene3D />
+        <div className="relative h-[45vh] w-full lg:absolute lg:inset-0 lg:h-auto">
+          {view === '3d' ? <KitchenScene3D /> : view === 'plan' ? <PlanView /> : <ElevationView />}
+
+          {/* view toggle */}
+          <div className="absolute left-1/2 top-4 flex -translate-x-1/2 gap-1 rounded-full bg-white/90 p-1 shadow-card">
+            {VIEWS.map(v => (
+              <button
+                key={v.id}
+                onClick={() => setView(v.id)}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                  view === v.id ? 'bg-hds-black text-white' : 'text-hds-muted hover:text-hds-black'
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* step panel — floating card on lg, bottom sheet on mobile */}

@@ -4,6 +4,7 @@
 
 import type { BoardMaterial } from '../data/boardMaterials'
 import { CARCASS_BOARD } from '../data/boardMaterials'
+import { nestBom } from './nest'
 import { FIXINGS_ALLOWANCE, SHELF_SUPPORT, TIER_HARDWARE } from '../data/hardware'
 import type { Bom } from './bom'
 
@@ -60,14 +61,20 @@ export function sheetsNeeded(areaMm2: number, sheet: BoardMaterial): number {
   return Math.max(1, Math.ceil((areaMm2 * WASTE_FACTOR) / sheetArea))
 }
 
-export function priceKitchen(bom: Bom, doorMaterial: BoardMaterial, tier: Tier): PriceBreakdown {
+export function priceKitchen(
+  bom: Bom,
+  doorMaterial: BoardMaterial,
+  tier: Tier,
+  sheetCounts?: { carcass: number; door: number; back: number },
+): PriceBreakdown {
   const carcassArea = panelAreaMm2(bom, 'carcass')
   const doorArea = panelAreaMm2(bom, 'door')
   const backArea = panelAreaMm2(bom, 'back')
 
-  const carcassSheets = sheetsNeeded(carcassArea, CARCASS_BOARD)
-  const doorSheets = sheetsNeeded(doorArea, doorMaterial)
-  const backerSheets = Math.max(1, Math.ceil((backArea * 1.1) / BACKER_SHEET_AREA_MM2))
+  // real nested board counts when available, else the area/waste estimate
+  const carcassSheets = sheetCounts?.carcass ?? sheetsNeeded(carcassArea, CARCASS_BOARD)
+  const doorSheets = sheetCounts?.door ?? sheetsNeeded(doorArea, doorMaterial)
+  const backerSheets = sheetCounts?.back ?? Math.max(1, Math.ceil((backArea * 1.1) / BACKER_SHEET_AREA_MM2))
 
   const hw = TIER_HARDWARE[tier]
   const hardwareCost =
@@ -131,9 +138,19 @@ export function priceAllTiers(
   bom: Bom,
   doorMaterials: Record<Tier, BoardMaterial>,
 ): Record<Tier, PriceBreakdown> {
+  // nesting is ~1–2ms — use real board counts per tier
+  const counts = (m: BoardMaterial) => {
+    if (bom.lines.length === 0) return undefined
+    const n = nestBom(bom, m)
+    return {
+      carcass: n.byMaterial.carcass.boards,
+      door: n.byMaterial.door.boards,
+      back: n.byMaterial.back.boards,
+    }
+  }
   return {
-    value: priceKitchen(bom, doorMaterials.value, 'value'),
-    standard: priceKitchen(bom, doorMaterials.standard, 'standard'),
-    premium: priceKitchen(bom, doorMaterials.premium, 'premium'),
+    value: priceKitchen(bom, doorMaterials.value, 'value', counts(doorMaterials.value)),
+    standard: priceKitchen(bom, doorMaterials.standard, 'standard', counts(doorMaterials.standard)),
+    premium: priceKitchen(bom, doorMaterials.premium, 'premium', counts(doorMaterials.premium)),
   }
 }

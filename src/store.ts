@@ -4,6 +4,7 @@ import type { PlacedUnit } from './engine/rules'
 import { proposeLayouts, type Proposal } from './engine/propose'
 import { buildBom, type Bom } from './engine/bom'
 import { priceKitchen, type PriceBreakdown, type Tier } from './engine/pricing'
+import { nestBom, type NestResult } from './engine/nest'
 import { DOOR_MATERIALS, findDoorMaterial, tierForMaterial } from './data/boardMaterials'
 import { CABINET_LIBRARY, getModule, moduleIdFor } from './data/cabinetLibrary'
 import type { QuoteResult } from './api/optimizerClient'
@@ -28,6 +29,9 @@ interface KitchenState {
   doorMaterialId: string
   bom: Bom | null
   estimate: PriceBreakdown | null
+  nest: NestResult | null
+  /** short id for this design — used in printed label QR codes */
+  designId: string
   customer: { name: string; phone: string; project: string }
   quote: { status: 'idle' | 'sending' | 'done' | 'error'; result: QuoteResult | null }
 
@@ -45,6 +49,7 @@ interface KitchenState {
   setCustomer: (c: Partial<KitchenState['customer']>) => void
   setQuote: (q: KitchenState['quote']) => void
   setStep: (s: Step) => void
+  resetDesign: () => void
 }
 
 const defaultRoom: RoomSpec = {
@@ -64,11 +69,24 @@ const defaultRoom: RoomSpec = {
   ],
 }
 
+const newDesignId = () => `D-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+
 function recalc(units: PlacedUnit[], tier: Tier, doorMaterialId: string) {
   const bom = buildBom(units)
   const doorMat = findDoorMaterial(doorMaterialId) ?? DOOR_MATERIALS[tier][0]
-  const estimate = priceKitchen(bom, doorMat, tier)
-  return { bom, estimate }
+  const nest = bom.lines.length > 0 ? nestBom(bom, doorMat) : null
+  const estimate = priceKitchen(bom, doorMat, tier, nest ? {
+    carcass: nest.byMaterial.carcass.boards,
+    door: nest.byMaterial.door.boards,
+    back: nest.byMaterial.back.boards,
+  } : undefined)
+  return { bom, estimate, nest }
+}
+
+/** A design change after a quote was generated invalidates it. */
+function staleQuote(q: KitchenState['quote']): KitchenState['quote'] {
+  if (q.status === 'done' || q.status === 'error') return { status: 'idle', result: q.result }
+  return q
 }
 
 export const useStore = create<KitchenState>((set, get) => ({
@@ -82,6 +100,8 @@ export const useStore = create<KitchenState>((set, get) => ({
   doorMaterialId: DOOR_MATERIALS.standard[0].id,
   bom: null,
   estimate: null,
+  nest: null,
+  designId: newDesignId(),
   customer: { name: '', phone: '', project: '' },
   quote: { status: 'idle', result: null },
 
@@ -92,13 +112,14 @@ export const useStore = create<KitchenState>((set, get) => ({
     const proposals = proposeLayouts(room, 3)
     const selected = proposals[0] ?? null
     const units = selected ? selected.units.map(u => ({ ...u })) : []
-    const { bom, estimate } = recalc(units, tier, doorMaterialId)
+    const { bom, estimate, nest } = recalc(units, tier, doorMaterialId)
     set({
       proposals,
       selectedProposalId: selected?.id ?? null,
       units,
       bom,
       estimate,
+      nest,
       step: 'layout',
       selectedUnitId: null,
       quote: { status: 'idle', result: null },
@@ -110,8 +131,8 @@ export const useStore = create<KitchenState>((set, get) => ({
     const p = proposals.find(p => p.id === id)
     if (!p) return
     const units = p.units.map(u => ({ ...u }))
-    const { bom, estimate } = recalc(units, tier, doorMaterialId)
-    set({ selectedProposalId: id, units, bom, estimate, selectedUnitId: null })
+    const { bom, estimate, nest } = recalc(units, tier, doorMaterialId)
+    set({ selectedProposalId: id, units, bom, estimate, nest, selectedUnitId: null, quote: staleQuote(get().quote) })
   },
 
   selectUnit: id => set({ selectedUnitId: id }),
@@ -123,8 +144,8 @@ export const useStore = create<KitchenState>((set, get) => ({
       const m = getModule(moduleId)
       return { ...u, moduleId, widthMm: m.widthMm, kind: m.kind, mounted: (m.kind === 'wall' ? 'wall' : m.kind === 'tall' ? 'tall' : u.mounted) as PlacedUnit['mounted'] }
     })
-    const { bom, estimate } = recalc(next, tier, doorMaterialId)
-    set({ units: next, bom, estimate })
+    const { bom, estimate, nest } = recalc(next, tier, doorMaterialId)
+    set({ units: next, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   nudgeUnit: (instanceId, deltaMm) => {
@@ -136,8 +157,8 @@ export const useStore = create<KitchenState>((set, get) => ({
       const start = Math.max(0, Math.min(wall.lengthMm - u.widthMm, u.startMm + deltaMm))
       return { ...u, startMm: Math.round(start) }
     })
-    const { bom, estimate } = recalc(next, get().tier, get().doorMaterialId)
-    set({ units: next, bom, estimate })
+    const { bom, estimate, nest } = recalc(next, get().tier, get().doorMaterialId)
+    set({ units: next, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   setUnitWidth: (instanceId, widthMm) => {
@@ -149,14 +170,14 @@ export const useStore = create<KitchenState>((set, get) => ({
       const m = getModule(moduleId)
       return { ...u, moduleId, widthMm: m.widthMm }
     })
-    const { bom, estimate } = recalc(next, get().tier, get().doorMaterialId)
-    set({ units: next, bom, estimate })
+    const { bom, estimate, nest } = recalc(next, get().tier, get().doorMaterialId)
+    set({ units: next, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   removeUnit: instanceId => {
     const next = get().units.filter(u => u.instanceId !== instanceId)
-    const { bom, estimate } = recalc(next, get().tier, get().doorMaterialId)
-    set({ units: next, bom, estimate, selectedUnitId: null })
+    const { bom, estimate, nest } = recalc(next, get().tier, get().doorMaterialId)
+    set({ units: next, bom, estimate, nest, selectedUnitId: null, quote: staleQuote(get().quote) })
   },
 
   addUnit: (moduleId, wallId) => {
@@ -182,8 +203,8 @@ export const useStore = create<KitchenState>((set, get) => ({
       mounted: m.kind === 'wall' ? 'wall' : m.kind === 'tall' ? 'tall' : 'base',
     }
     const next = [...units, nu]
-    const { bom, estimate } = recalc(next, get().tier, get().doorMaterialId)
-    set({ units: next, bom, estimate })
+    const { bom, estimate, nest } = recalc(next, get().tier, get().doorMaterialId)
+    set({ units: next, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   setTier: tier => {
@@ -191,20 +212,35 @@ export const useStore = create<KitchenState>((set, get) => ({
     // if the chosen door material isn't in this tier, fall back to tier default
     const inTier = DOOR_MATERIALS[tier].some(m => m.id === doorMaterialId)
     const matId = inTier ? doorMaterialId : DOOR_MATERIALS[tier][0].id
-    const { bom, estimate } = recalc(units, tier, matId)
-    set({ tier, doorMaterialId: matId, bom, estimate })
+    const { bom, estimate, nest } = recalc(units, tier, matId)
+    set({ tier, doorMaterialId: matId, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   setDoorMaterial: id => {
     const { units } = get()
     const tier = tierForMaterial(id)
-    const { bom, estimate } = recalc(units, tier, id)
-    set({ doorMaterialId: id, tier, bom, estimate })
+    const { bom, estimate, nest } = recalc(units, tier, id)
+    set({ doorMaterialId: id, tier, bom, estimate, nest, quote: staleQuote(get().quote) })
   },
 
   setCustomer: c => set({ customer: { ...get().customer, ...c } }),
   setQuote: q => set({ quote: q }),
   setStep: s => set({ step: s }),
+
+  resetDesign: () =>
+    set({
+      room: defaultRoom,
+      step: 'room',
+      proposals: [],
+      selectedProposalId: null,
+      units: [],
+      selectedUnitId: null,
+      bom: null,
+      estimate: null,
+      nest: null,
+      designId: newDesignId(),
+      quote: { status: 'idle', result: null },
+    }),
 }))
 
 export { CABINET_LIBRARY }
