@@ -302,10 +302,40 @@ export const CABINET_LIBRARY: CabinetModule[] = [
   appliance('DW600', 'Dishwasher 600', 'dishwasher', 600, 870, 560),
 ]
 
+const CUSTOM_ID = /^(B|D|W|T)(\d{3,4})$/
+const CUSTOM_RANGES: Record<string, [number, number]> = {
+  B: [300, 1000],
+  D: [300, 1000],
+  W: [300, 1000],
+  T: [300, 600],
+}
+const customCache = new Map<string, CabinetModule>()
+
 export function getModule(id: string): CabinetModule {
   const m = CABINET_LIBRARY.find(m => m.id === id)
-  if (!m) throw new Error(`Unknown cabinet module: ${id}`)
-  return m
+  if (m) return m
+  const match = CUSTOM_ID.exec(id)
+  if (match) {
+    const cached = customCache.get(id)
+    if (cached) return cached
+    const w = Number(match[2])
+    const [min, max] = CUSTOM_RANGES[match[1]]
+    if (w < min || w > max) throw new Error(`Custom module ${id} out of range ${min}–${max}mm`)
+    const built =
+      match[1] === 'B' ? { ...baseModule(w), name: `Base unit ${w} (cut to size)` }
+      : match[1] === 'D' ? { ...drawerModule(w), name: `Drawer unit ${w} (cut to size)` }
+      : match[1] === 'W' ? { ...wallModule(w), name: `Wall unit ${w} (cut to size)` }
+      : tallModule(w, `Tall unit ${w} (cut to size)`)
+    customCache.set(id, built)
+    return built
+  }
+  throw new Error(`Unknown cabinet module: ${id}`)
+}
+
+/** Module id for a parametric cabinet of the given kind and width. */
+export function moduleIdFor(kind: 'base' | 'drawer' | 'wall' | 'tall', widthMm: number): string {
+  const prefix = { base: 'B', drawer: 'D', wall: 'W', tall: 'T' }[kind]
+  return `${prefix}${Math.round(widthMm)}`
 }
 
 /** Fillable base widths (excluding specials/appliances) used by the fit engine. */

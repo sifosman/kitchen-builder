@@ -26,19 +26,20 @@ export interface Proposal {
 }
 
 const BASE_WIDTHS = [900, 600, 450, 300]
-const DRAWER_WIDTHS = [450, 600, 900]
 const SINK_WIDTHS = [600, 900, 1000]
 const MAX_FILLER_MM = FILLER_MAX_MM
 
-interface Zone { s: number; e: number }
+interface Zone { s: number; e: number; hard?: boolean; hardLeft?: boolean; hardRight?: boolean }
 
 function mergeZones(zones: Zone[]): Zone[] {
   const sorted = [...zones].sort((a, b) => a.s - b.s)
   const out: Zone[] = []
   for (const z of sorted) {
     const last = out[out.length - 1]
-    if (last && z.s <= last.e) last.e = Math.max(last.e, z.e)
-    else out.push({ ...z })
+    if (last && z.s <= last.e) {
+      last.e = Math.max(last.e, z.e)
+      last.hard = last.hard || z.hard
+    } else out.push({ ...z })
   }
   return out
 }
@@ -113,9 +114,23 @@ interface WallPlan {
   fixed: PlacedUnit[]
   occupied: Zone[]        // base-level occupied
   wallOccupied: Zone[]    // wall-unit-level occupied
-  spans: Zone[]
+  spans: Zone[]           // each span carries hard-left/hard-right boundary flags
   wallSpans: Zone[]
   sinkUnit?: PlacedUnit
+}
+
+/**
+ * Boundary hardness: an edge of a span is "hard" when it meets the wall end,
+ * a corner dead-zone, a door/block/window, a fridge slot or a tall unit.
+ * Edges beside a sink, oven/hob extractor zone or dishwasher are "soft" —
+ * leftover space there is absorbed into a cabinet rather than filled.
+ */
+function withBoundaries(spans: Zone[], zones: Zone[], wallLen: number): Zone[] {
+  return spans.map(span => {
+    const left = span.s === 0 ? true : zones.find(z => z.e === span.s)?.hard ?? true
+    const right = span.e === wallLen ? true : zones.find(z => z.s === span.e)?.hard ?? true
+    return { ...span, hardLeft: left, hardRight: right }
+  })
 }
 
 /** Pin the fixed items on one wall and compute fillable spans. */
@@ -127,8 +142,8 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
 
   // corner dead-space: secondary walls lose the first 610mm (base) / 330mm (wall)
   if (wallIndex > 0) {
-    occupied.push({ s: 0, e: Math.min(CORNER_DEAD_BASE_MM, wall.lengthMm) })
-    wallOccupied.push({ s: 0, e: Math.min(CORNER_DEAD_WALL_MM, wall.lengthMm) })
+    occupied.push({ s: 0, e: Math.min(CORNER_DEAD_BASE_MM, wall.lengthMm), hard: true })
+    wallOccupied.push({ s: 0, e: Math.min(CORNER_DEAD_WALL_MM, wall.lengthMm), hard: true })
   }
 
   const pendingDishwashers: Array<{ offsetMm: number; widthMm: number }> = []
@@ -139,22 +154,22 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
     switch (o.kind) {
       case 'door':
       case 'block':
-        occupied.push({ s, e })
-        wallOccupied.push({ s, e })
+        occupied.push({ s, e, hard: true })
+        wallOccupied.push({ s, e, hard: true })
         break
       case 'window': {
         const sill = o.sillHeightMm ?? 900
         const top = sill + (o.heightMm ?? 1200)
-        if (sill < 870) occupied.push({ s, e })
-        if (top > 1450) wallOccupied.push({ s, e })
+        if (sill < 870) occupied.push({ s, e, hard: true })
+        if (top > 1450) wallOccupied.push({ s, e, hard: true })
         break
       }
       case 'fridge': {
         const moduleId = pickFridgeModule(o.widthMm)
         const u = unit(moduleId, wall.id, s)
         fixed.push(u)
-        occupied.push({ s: s - FRIDGE_VENT_MM, e: e + FRIDGE_VENT_MM })
-        wallOccupied.push({ s, e }) // no wall units over the fridge slot either
+        occupied.push({ s: s - FRIDGE_VENT_MM, e: e + FRIDGE_VENT_MM, hard: true })
+        wallOccupied.push({ s, e, hard: true }) // no wall units over the fridge slot either
         break
       }
       case 'hob': {
@@ -164,8 +179,8 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
         const unitStart = start + Math.max(0, (w - 600) / 2)
         const u = unit('OVEN600', wall.id, unitStart, 600, 'oven')
         fixed.push(u)
-        occupied.push({ s: start, e: start + w })
-        wallOccupied.push({ s: start - 50, e: start + w + 50 }) // extractor zone
+        occupied.push({ s: start, e: start + w, hard: false })
+        wallOccupied.push({ s: start - 50, e: start + w + 50, hard: false }) // extractor zone
         break
       }
       case 'plumbing': {
@@ -174,7 +189,7 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
         const start = Math.max(0, Math.min(wall.lengthMm - w, centre - w / 2))
         sinkUnit = unit(`SINK${w === 1000 ? 1000 : w}`, wall.id, start)
         fixed.push(sinkUnit)
-        occupied.push({ s: start, e: start + w })
+        occupied.push({ s: start, e: start + w, hard: false })
         break
       }
       case 'dishwasher':
@@ -202,19 +217,21 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
     }
     const unitStart = start + Math.max(0, (w - 600) / 2)
     fixed.push(unit('DW600', wall.id, unitStart, 600, 'dishwasher'))
-    occupied.push({ s: start, e: start + w })
-    wallOccupied.push({ s: start, e: start + w })
+    occupied.push({ s: start, e: start + w, hard: false })
+    wallOccupied.push({ s: start, e: start + w, hard: false })
   }
 
   const merged = mergeZones(occupied)
   const mergedWall = mergeZones(wallOccupied)
+  const spans = complement(merged, wall.lengthMm).filter(z => z.e - z.s >= 50)
+  const wallSpans = complement(mergedWall, wall.lengthMm).filter(z => z.e - z.s >= 250)
   return {
     wall,
     fixed,
     occupied: merged,
     wallOccupied: mergedWall,
-    spans: complement(merged, wall.lengthMm).filter(z => z.e - z.s >= 50),
-    wallSpans: complement(mergedWall, wall.lengthMm).filter(z => z.e - z.s >= 250),
+    spans: withBoundaries(spans, merged, wall.lengthMm),
+    wallSpans: withBoundaries(wallSpans, mergedWall, wall.lengthMm),
     sinkUnit,
   }
 }
@@ -224,42 +241,141 @@ interface FillResult {
   leftoverMm: number
 }
 
-/** Place a multiset of module widths + fillers into a span. */
-function placeCombo(span: Zone, combo: number[], wallId: string, kindFor: (w: number, idx: number) => { moduleId: string; kind?: CabinetKind }, opts: { preferDrawerNear?: number } = {}): FillResult {
+/**
+ * Place a multiset of module widths into a span and resolve the leftover:
+ *  - L === 0            → nothing
+ *  - 0 < L < 20         → widen the widest non-drawer unit (cut-to-size)
+ *  - 20 ≤ L ≤ 80 + hard boundary → one filler at the hard end (prefer the
+ *    wall-end / tall-unit side, else the end farther from the sink)
+ *  - otherwise          → absorb L into units (widen widest ≤1000, then split)
+ * Fillers therefore only ever sit against a hard boundary, never mid-run.
+ */
+function placeCombo(
+  span: Zone,
+  combo: number[],
+  wallId: string,
+  kindFor: (w: number, idx: number) => { moduleId: string; kind?: CabinetKind },
+  opts: { sinkCentre?: number; wallLenMm: number },
+): FillResult {
   const len = span.e - span.s
   const sum = combo.reduce((a, b) => a + b, 0)
   let leftover = len - sum
   const placements: PlacedUnit[] = []
   let x = span.s
-
-  // order: largest modules first, drawer candidate nearest the sink/prep point
-  const ordered = [...combo]
-  if (opts.preferDrawerNear !== undefined) {
-    // keep widths but we'll mark which index gets the drawer via kindFor
-  }
-
-  for (let i = 0; i < ordered.length; i++) {
-    const w = ordered[i]
+  for (let i = 0; i < combo.length; i++) {
+    const w = combo[i]
     const { moduleId, kind } = kindFor(w, i)
     placements.push(unit(moduleId, wallId, x, w, kind))
     x += w
   }
 
-  // leftover → scribe filler(s) beside the last module, else leave as void
-  if (leftover >= FILLER_MIN_MM) {
-    if (leftover <= MAX_FILLER_MM) {
-      placements.push(unit(fillerModuleId(leftover), wallId, x, leftover, 'filler'))
-      leftover = 0
-    } else if (leftover <= MAX_FILLER_MM * 2) {
-      const f1 = Math.floor(leftover / 2)
-      const f2 = leftover - f1
-      placements.push(unit(fillerModuleId(f1), wallId, x, f1, 'filler'))
-      placements.push(unit(fillerModuleId(f2), wallId, x + f1, f2, 'filler'))
-      leftover = 0
+  const repack = () => {
+    let pos = span.s
+    for (const p of placements) {
+      p.startMm = Math.round(pos)
+      pos += p.widthMm
     }
-    // larger remainders stay as void (noted by caller)
   }
+
+  /** Widen the widest non-drawer unit(s) by `amount`; returns unabsorbed rest. */
+  const absorb = (amount: number): number => {
+    let remaining = amount
+    const candidates = [...placements].filter(p => p.kind !== 'drawer').sort((a, b) => b.widthMm - a.widthMm)
+    for (const p of candidates) {
+      if (remaining <= 0) break
+      const add = Math.min(1000 - p.widthMm, remaining)
+      if (add <= 0) continue
+      p.widthMm += add
+      p.moduleId = kindFor(p.widthMm, 0).moduleId
+      remaining -= add
+    }
+    repack()
+    return remaining
+  }
+
+  if (leftover <= 0) return { placements, leftoverMm: Math.max(0, leftover) }
+
+  if (leftover < FILLER_MIN_MM) {
+    leftover = absorb(leftover)
+    return { placements, leftoverMm: leftover }
+  }
+
+  if (leftover <= FILLER_IDEAL_MAX_MM && (span.hardLeft || span.hardRight)) {
+    // one filler at the hard end — wall end / tall side wins, then the end
+    // farther from the sink
+    let atLeft: boolean
+    if (span.hardLeft && span.hardRight) {
+      if (span.s === 0) atLeft = true
+      else if (span.e === opts.wallLenMm) atLeft = false
+      else if (opts.sinkCentre !== undefined) {
+        atLeft = Math.abs(span.s - opts.sinkCentre) >= Math.abs(span.e - opts.sinkCentre)
+      } else atLeft = false
+    } else {
+      atLeft = !!span.hardLeft
+    }
+    const f = unit(fillerModuleId(leftover), wallId, atLeft ? span.s : span.e - leftover, leftover, 'filler')
+    if (atLeft) {
+      for (const p of placements) p.startMm += leftover
+      placements.unshift(f)
+    } else {
+      placements.push(f)
+    }
+    return { placements, leftoverMm: 0 }
+  }
+
+  leftover = absorb(leftover)
   return { placements, leftoverMm: leftover }
+}
+
+/**
+ * One drawer bank per wall run: convert a single base door unit to a
+ * parametric drawer unit. Prefer the unit between the sink and the hob/oven
+ * (prep zone), else nearest the sink; never the only unit at a wall end when
+ * an interior candidate exists. A second bank goes to the far side of the
+ * sink only when the wall has ≥ 6 base cabinets.
+ */
+function applyDrawerBank(units: PlacedUnit[], wall: Wall): PlacedUnit[] {
+  const bases = units.filter(u => u.wallId === wall.id && u.mounted === 'base' && u.kind === 'base')
+  if (bases.length === 0) return units
+  const sink = units.find(u => u.wallId === wall.id && u.kind === 'sink')
+  const oven = units.find(u => u.wallId === wall.id && (u.kind === 'oven' || u.kind === 'hob'))
+  const sinkC = sink ? sink.startMm + sink.widthMm / 2 : undefined
+
+  const centre = (u: PlacedUnit) => u.startMm + u.widthMm / 2
+  const distToSink = (u: PlacedUnit) => (sinkC === undefined ? 0 : Math.abs(centre(u) - sinkC))
+
+  const pickOne = (candidates: PlacedUnit[], exclude: Set<string>): PlacedUnit | undefined => {
+    let pool = candidates.filter(u => !exclude.has(u.instanceId))
+    if (sink && oven) {
+      const lo = Math.min(sink.startMm + sink.widthMm, oven.startMm + oven.widthMm)
+      const hi = Math.max(sink.startMm, oven.startMm)
+      const between = pool.filter(u => u.startMm >= lo && u.startMm + u.widthMm <= hi)
+      if (between.length > 0) pool = between
+    }
+    const interior = pool.filter(u => u.startMm > 0 && u.startMm + u.widthMm < wall.lengthMm)
+    if (interior.length > 0) pool = interior
+    if (pool.length === 0) return undefined
+    return pool.reduce((best, u) => (distToSink(u) < distToSink(best) ? u : best))
+  }
+
+  const first = pickOne(bases, new Set())
+  if (!first) return units
+  const chosen = new Set([first.instanceId])
+
+  const baseCabinets = units.filter(u => u.wallId === wall.id && u.mounted === 'base')
+  if (baseCabinets.length >= 6 && sink) {
+    // second bank on the far side of the sink
+    const firstRight = centre(first) > sinkC!
+    const farSide = bases.filter(u => !chosen.has(u.instanceId) && (firstRight ? centre(u) < sinkC! : centre(u) > sinkC!))
+    const second = pickOne(farSide.length > 0 ? farSide : bases, chosen)
+    if (second) chosen.add(second.instanceId)
+  }
+
+  return units.map(u =>
+    chosen.has(u.instanceId)
+      ? { ...u, moduleId: `D${u.widthMm}`, kind: 'drawer' as CabinetKind }
+      : u,
+  )
 }
 
 /**
@@ -277,13 +393,14 @@ export function proposeLayouts(room: RoomSpec, maxProposals = 3): Proposal[] {
     const spanFills: FillResult[][] = plan.spans.map(span => {
       const len = span.e - span.s
       const combos = widthCombos(len, BASE_WIDTHS, MAX_FILLER_MM * 2)
-      // rank combos: fewer modules, larger widths, small leftover
+      // rank combos: exact cover, then 20–80mm leftover (a legal filler),
+      // then the smallest leftover to absorb
       combos.sort((a, b) => {
         const leftA = len - a.reduce((x, y) => x + y, 0)
         const leftB = len - b.reduce((x, y) => x + y, 0)
-        const idealA = leftA === 0 || (leftA >= FILLER_MIN_MM && leftA <= FILLER_IDEAL_MAX_MM) ? 0 : 1
-        const idealB = leftB === 0 || (leftB >= FILLER_MIN_MM && leftB <= FILLER_IDEAL_MAX_MM) ? 0 : 1
-        if (idealA !== idealB) return idealA - idealB
+        const rankA = leftA === 0 ? 0 : leftA >= FILLER_MIN_MM && leftA <= FILLER_IDEAL_MAX_MM ? 1 : 2
+        const rankB = leftB === 0 ? 0 : leftB >= FILLER_MIN_MM && leftB <= FILLER_IDEAL_MAX_MM ? 1 : 2
+        if (rankA !== rankB) return rankA - rankB
         if (a.length !== b.length) return a.length - b.length
         return leftA - leftB
       })
@@ -293,24 +410,7 @@ export function proposeLayouts(room: RoomSpec, maxProposals = 3): Proposal[] {
       const sinkCentre = plan.sinkUnit ? plan.sinkUnit.startMm + plan.sinkUnit.widthMm / 2 : undefined
 
       for (const combo of top) {
-        // style A: all door units
-        fills.push(placeCombo(span, combo, plan.wall.id, w => ({ moduleId: `B${w}` })))
-        // style B: swap the module nearest the sink for a drawer unit
-        if (sinkCentre !== undefined) {
-          let bestIdx = -1
-          let bestDist = Infinity
-          let x = span.s
-          for (let i = 0; i < combo.length; i++) {
-            const w = combo[i]
-            const d = Math.abs(x + w / 2 - sinkCentre)
-            if (DRAWER_WIDTHS.includes(w) && d < bestDist) { bestDist = d; bestIdx = i }
-            x += w
-          }
-          if (bestIdx >= 0) {
-            fills.push(placeCombo(span, combo, plan.wall.id, (w, i) =>
-              i === bestIdx ? { moduleId: `D${w}`, kind: 'drawer' } : { moduleId: `B${w}` }))
-          }
-        }
+        fills.push(placeCombo(span, combo, plan.wall.id, w => ({ moduleId: `B${w}` }), { sinkCentre, wallLenMm: plan.wall.lengthMm }))
       }
       if (fills.length === 0) {
         // span too small/awkward — full-width filler or void
@@ -340,7 +440,7 @@ export function proposeLayouts(room: RoomSpec, maxProposals = 3): Proposal[] {
           wCombos.sort((a, b) => a.length - b.length)
           const chosen = wCombos[0]
           if (chosen && chosen.length > 0) {
-            const res = placeCombo(ws, chosen, plan.wall.id, w => ({ moduleId: `W${w}` }), {})
+            const res = placeCombo(ws, chosen, plan.wall.id, w => ({ moduleId: `W${w}` }), { wallLenMm: plan.wall.lengthMm })
             for (const p of res.placements) p.mounted = 'wall'
             units.push(...res.placements)
           }
@@ -363,7 +463,7 @@ export function proposeLayouts(room: RoomSpec, maxProposals = 3): Proposal[] {
         wCombos.sort((a, b) => a.length - b.length)
         const chosen = wCombos[0]
         if (chosen && chosen.length > 0) {
-          const res = placeCombo(ws, chosen, plan.wall.id, w => ({ moduleId: `W${w}` }), {})
+          const res = placeCombo(ws, chosen, plan.wall.id, w => ({ moduleId: `W${w}` }), { wallLenMm: plan.wall.lengthMm })
           for (const p of res.placements) p.mounted = 'wall'
           units.push(...res.placements)
         }
@@ -395,7 +495,24 @@ export function proposeLayouts(room: RoomSpec, maxProposals = 3): Proposal[] {
   }
   cx(0, [], [])
 
+  // Every combined layout yields two proposal variants: with a per-wall
+  // drawer bank, and all doors. Dedupe by signature so identical results
+  // collapse (e.g. a wall with no base units).
+  const seenVariants = new Set<string>()
+  const expanded: { units: PlacedUnit[]; notes: string[] }[] = []
   for (const c of combined) {
+    for (const withDrawers of [true, false]) {
+      const units = withDrawers
+        ? room.walls.reduce((us, w) => applyDrawerBank(us, w), c.units.map(u => ({ ...u })))
+        : c.units
+      const sig = signature(units)
+      if (seenVariants.has(sig)) continue
+      seenVariants.add(sig)
+      expanded.push({ units, notes: c.notes })
+    }
+  }
+
+  for (const c of expanded) {
     const violations = validateLayout(c.units, room)
     const score = scoreLayout(c.units, room) - violations.length * 100
     proposals.push({

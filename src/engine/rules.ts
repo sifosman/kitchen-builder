@@ -116,6 +116,19 @@ export function validateLayout(units: PlacedUnit[], room: RoomSpec): string[] {
     }
   }
 
+  // fillers may only sit against a hard boundary (wall end, fridge, tall
+  // unit, door/block) — a filler between two cabinets/appliances is mid-run
+  for (const f of units.filter(u => u.kind === 'filler')) {
+    const band = (u: PlacedUnit) => (u.mounted === 'wall' ? 'wall' : 'floor')
+    const row = units.filter(u => u !== f && u.wallId === f.wallId && band(u) === band(f))
+    const left = row.find(u => u.startMm + u.widthMm === f.startMm)
+    const right = row.find(u => u.startMm === f.startMm + f.widthMm)
+    const hard = (u?: PlacedUnit) => !!u && (u.kind === 'fridge' || u.kind === 'tall')
+    if (left && right && !hard(left) && !hard(right)) {
+      violations.push(`${f.instanceId} (${f.moduleId}): filler mid-run on wall ${f.wallId}`)
+    }
+  }
+
   // hob must not sit directly against a tall unit
   for (const hob of units.filter(u => u.kind === 'hob')) {
     for (const tall of units.filter(u => u.kind === 'tall' && u.wallId === hob.wallId)) {

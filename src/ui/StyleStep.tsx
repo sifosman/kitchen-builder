@@ -1,33 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { DOOR_MATERIALS, type BoardMaterial } from '../data/boardMaterials'
+import { allDoorMaterials, findDoorMaterial, RANGES, type BoardMaterial, type MaterialRange } from '../data/boardMaterials'
 import { buildBom } from '../engine/bom'
-import { priceKitchen, type Tier } from '../engine/pricing'
+import { priceKitchen } from '../engine/pricing'
 
 const fmt = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`
 
 const isWoodgrain = (m: BoardMaterial) =>
-  m.texture === 'woodgrain' || (m.texture === 'gloss' && /oak|driftwood|cherry/i.test(m.name))
-
-const TIERS: { id: Tier; label: string; blurb: string }[] = [
-  { id: 'value', label: 'Value', blurb: 'Melamine doors, standard hinges & runners' },
-  { id: 'standard', label: 'Standard', blurb: 'Melawood doors, soft-close throughout' },
-  { id: 'premium', label: 'Premium', blurb: 'Gloss / SilkTouch doors, under-mount runners' },
-]
+  m.texture === 'woodgrain' || (m.texture === 'gloss' && /oak|driftwood|cherry/i.test(m.name)) ||
+  m.texture === 'linear'
 
 export default function StyleStep() {
-  const { tier, setTier, doorMaterialId, setDoorMaterial, estimate, bom, units, setStep } = useStore()
+  const { doorMaterialId, setDoorMaterial, estimate, bom, units, setStep } = useStore()
   const [breakdownOpen, setBreakdownOpen] = useState(false)
-  const materials = DOOR_MATERIALS[tier]
 
-  const priceForTier = (t: Tier) => {
+  const selectedMat = findDoorMaterial(doorMaterialId)
+  const [rangeTab, setRangeTab] = useState<MaterialRange>(selectedMat?.range ?? 'melawood')
+
+  // keep the tab in sync when the material's range changes (price bar, defaults)
+  useEffect(() => {
+    if (selectedMat) setRangeTab(selectedMat.range)
+  }, [doorMaterialId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rangeMats = allDoorMaterials().filter(m => m.range === rangeTab)
+  const rangeMeta = RANGES.find(r => r.id === rangeTab)!
+
+  // estimate for this kitchen in the range's tier — the selected material if
+  // it's in this range, otherwise the range's default board
+  const rangeEstimate = (() => {
     if (units.length === 0) return null
+    const mat = rangeMats.find(m => m.id === doorMaterialId) ?? rangeMats[0]
+    if (!mat) return null
     try {
-      return priceKitchen(buildBom(units), DOOR_MATERIALS[t][0], t).total
+      return priceKitchen(buildBom(units), mat, rangeMeta.tier).total
     } catch {
       return null
     }
-  }
+  })()
 
   return (
     <div className="space-y-6">
@@ -36,41 +45,35 @@ export default function StyleStep() {
         <p className="mt-1 text-sm text-hds-muted">Choose a range and a door colour — the price updates live.</p>
       </div>
 
-      <div className="space-y-2">
-        {TIERS.map(t => {
-          const total = priceForTier(t.id)
-          const selected = tier === t.id
+      {/* range tabs */}
+      <div className="grid grid-cols-4 gap-1.5 rounded-xl bg-hds-sand p-1.5">
+        {RANGES.map(r => {
+          const mats = allDoorMaterials().filter(m => m.range === r.id)
+          const from = Math.min(...mats.map(m => m.pricePerSheet))
+          const active = rangeTab === r.id
           return (
             <button
-              key={t.id}
-              onClick={() => setTier(t.id)}
-              className={`flex w-full items-center gap-3 rounded-2xl border-2 bg-white p-4 text-left transition-colors ${
-                selected ? 'border-hds-gold shadow-card' : 'border-hds-border hover:border-hds-gold/60'
+              key={r.id}
+              onClick={() => setRangeTab(r.id)}
+              className={`rounded-lg px-2 py-2 text-center transition-colors ${
+                active ? 'bg-hds-black text-white shadow-card' : 'text-hds-black hover:bg-white'
               }`}
             >
-              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${selected ? 'border-hds-gold' : 'border-hds-border'}`}>
-                {selected && <span className="h-2.5 w-2.5 rounded-full bg-hds-gold" />}
-              </span>
-              <span className="flex-1">
-                <span className="block text-sm font-semibold text-hds-black">
-                  {t.label}
-                  {t.id === 'standard' && (
-                    <span className="ml-2 rounded-full bg-hds-gold/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-hds-black">Most popular</span>
-                  )}
-                </span>
-                <span className="block text-xs text-hds-muted">{t.blurb}</span>
-              </span>
-              {total !== null && <span className="text-sm font-semibold text-hds-black">{fmt(total)}</span>}
+              <span className="block text-xs font-semibold">{r.label}</span>
+              <span className={`block text-[10px] ${active ? 'text-white/70' : 'text-hds-muted'}`}>from R{from.toLocaleString('en-ZA')}</span>
             </button>
           )
         })}
       </div>
+      <p className="-mt-3 text-xs text-hds-muted">
+        {rangeMeta.label} doors · {rangeMeta.blurb}
+        {rangeEstimate !== null && <> · estimated <span className="font-medium text-hds-black">{fmt(rangeEstimate)}</span> for this kitchen</>}
+      </p>
 
       <div>
-        <p className="mb-2 text-sm font-medium text-hds-black">Door colour</p>
         {([
-          ['Woodgrains', materials.filter(m => isWoodgrain(m))],
-          ['Plain & textured colours', materials.filter(m => !isWoodgrain(m))],
+          ['Woodgrains', rangeMats.filter(m => isWoodgrain(m))],
+          ['Plain & textured colours', rangeMats.filter(m => !isWoodgrain(m))],
         ] as const).map(([label, group]) =>
           group.length === 0 ? null : (
             <div key={label} className="mb-4">

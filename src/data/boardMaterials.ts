@@ -2,6 +2,8 @@
 // apiDescription must match the `description` column verbatim — the quote API
 // looks pricing up by description (exact → ilike → wildcard fallback).
 
+import type { Tier } from '../engine/pricing'
+
 export type BoardTexture =
   | 'gloss'
   | 'super-matte'
@@ -11,6 +13,9 @@ export type BoardTexture =
   | 'fusion'
   | 'linear'
 
+/** Retail board range — drives the colour picker grouping. */
+export type MaterialRange = 'melamine' | 'melawood' | 'gloss' | 'silktouch'
+
 export interface BoardMaterial {
   id: string
   name: string
@@ -19,6 +24,7 @@ export interface BoardMaterial {
   /** Price per 2750×1830 sheet, R incl VAT */
   pricePerSheet: number
   texture: BoardTexture
+  range: MaterialRange
   hex: string
   /** Pre-cropped door texture for the 3D render (from kitchen-visualizer) */
   renderTexture?: string
@@ -37,13 +43,17 @@ export const CARCASS_BOARD: BoardMaterial = {
   apiDescription: 'INNOWOOD Chip Premium White Txt 9x6x16 DF',
   pricePerSheet: 620,
   texture: 'matt',
+  range: 'melamine',
   hex: '#F7F7F5',
   ...STD,
 }
 
+const ranged = (range: MaterialRange, list: Array<Omit<BoardMaterial, 'range'>>): BoardMaterial[] =>
+  list.map(m => ({ ...m, range }))
+
 /** Door/front board options grouped by price tier. */
 export const DOOR_MATERIALS: Record<'value' | 'standard' | 'premium', BoardMaterial[]> = {
-  value: [
+  value: ranged('melamine', [
     {
       id: 'premium-white',
       name: 'Premium White',
@@ -161,8 +171,125 @@ export const DOOR_MATERIALS: Record<'value' | 'standard' | 'premium', BoardMater
       renderTexture: '/images/cabinet-crops/washed-oak-door.png',
       ...STD,
     },
-  ],
-  standard: [
+    {
+      id: 'beige-linnen',
+      name: 'Beige Linnen',
+      apiDescription: 'INNOWOOD Chip Beige Linnen Txt 9x6x16 DF',
+      pricePerSheet: 875,
+      texture: 'matt',
+      hex: '#AA9D94',
+      ...STD,
+    },
+    {
+      id: 'black',
+      name: 'Black',
+      apiDescription: 'INNOWOOD Chip Black Txt 9x6x16 DF',
+      pricePerSheet: 875,
+      texture: 'matt',
+      hex: '#141414',
+      ...STD,
+    },
+    {
+      id: 'charcoal-grey',
+      name: 'Charcoal Grey',
+      apiDescription: 'INNOWOOD Chip Charcoal Grey Txt 9x6x16 DF',
+      pricePerSheet: 850,
+      texture: 'matt',
+      hex: '#5A5A66',
+      ...STD,
+    },
+    {
+      id: 'cherry-royal',
+      name: 'Cherry Royal',
+      apiDescription: 'INNOWOOD Chip Cherry Royal Linear 9x6x16 DF',
+      pricePerSheet: 850,
+      texture: 'woodgrain',
+      hex: '#7C3B2E',
+      ...STD,
+    },
+    {
+      id: 'driftwood',
+      name: 'Driftwood',
+      apiDescription: 'INNOWOOD Chip Driftwood LNR 9x6x16 DF',
+      pricePerSheet: 950,
+      texture: 'woodgrain',
+      hex: '#DAD9D5',
+      ...STD,
+    },
+    {
+      id: 'dune',
+      name: 'Dune',
+      apiDescription: 'INNOWOOD Chip Dune Txt 9x6x16 Df',
+      pricePerSheet: 875,
+      texture: 'matt',
+      hex: '#CCCCC6',
+      ...STD,
+    },
+    {
+      id: 'glaston',
+      name: 'Glaston',
+      apiDescription: 'INNOWOOD Chip Glaston LNR 9x6x16 DF',
+      pricePerSheet: 950,
+      texture: 'linear',
+      hex: '#8C8574',
+      ...STD,
+    },
+    {
+      id: 'kashmir',
+      name: 'Kashmir',
+      apiDescription: 'INNOWOOD Chip Kashmir Txt 9x6x16 DF',
+      pricePerSheet: 875,
+      texture: 'matt',
+      hex: '#C2C0B4',
+      ...STD,
+    },
+    {
+      id: 'metropolitan-loft',
+      name: 'Metropolitan Loft',
+      apiDescription: 'INNOWOOD Chip Metropolitan Loft Text 9x6x16 DF',
+      pricePerSheet: 950,
+      texture: 'matt',
+      hex: '#BBB8B4',
+      ...STD,
+    },
+    {
+      id: 'olivia',
+      name: 'Olivia',
+      apiDescription: 'INNOWOOD Chip Olivia Text 9x6x16 DF',
+      pricePerSheet: 875,
+      texture: 'matt',
+      hex: '#959C90',
+      ...STD,
+    },
+    {
+      id: 'pearl-grey',
+      name: 'Pearl Grey',
+      apiDescription: 'INNOWOOD Chip Pearl Grey Text 9x6x16 DF',
+      pricePerSheet: 875,
+      texture: 'matt',
+      hex: '#D4D6D0',
+      ...STD,
+    },
+    {
+      id: 'white-linnen',
+      name: 'White Linnen',
+      apiDescription: 'INNOWOOD Chip White Linnen Txt 9x6x16 DF',
+      pricePerSheet: 850,
+      texture: 'matt',
+      hex: '#DDDEDD',
+      ...STD,
+    },
+    {
+      id: 'white-linear',
+      name: 'White Linear',
+      apiDescription: 'INNOWOOD Chip White Linear 9x6x16 DF',
+      pricePerSheet: 875,
+      texture: 'linear',
+      hex: '#ECEAE6',
+      ...STD,
+    },
+  ]),
+  standard: ranged('melawood', [
     {
       id: 'storm-grey-peen',
       name: 'Storm Grey Peen',
@@ -199,8 +326,189 @@ export const DOOR_MATERIALS: Record<'value' | 'standard' | 'premium', BoardMater
       hex: '#4A3B32',
       ...STD,
     },
-  ],
+    {
+      id: 'alegria-linear',
+      name: 'Alegria Linear',
+      apiDescription: 'PG Bison Melawood on Chipboard Alegria Linear',
+      pricePerSheet: 1350,
+      texture: 'linear',
+      hex: '#B09A7C',
+      ...STD,
+    },
+    {
+      id: 'american-walnut-fusion',
+      name: 'American Walnut Fusion',
+      apiDescription: 'PG Bison Melawood on Chipboard American Walnut Fusion',
+      pricePerSheet: 1350,
+      texture: 'fusion',
+      hex: '#6B4F3A',
+      ...STD,
+    },
+    {
+      id: 'bellavista-peen',
+      name: 'Bellavista Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Bellavista Peen',
+      pricePerSheet: 1250,
+      texture: 'peen',
+      hex: '#EFE8DA',
+      ...STD,
+    },
+    {
+      id: 'cappuccino-peen',
+      name: 'Cappuccino Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Cappuccino Peen',
+      pricePerSheet: 1150,
+      texture: 'peen',
+      hex: '#A98F7A',
+      ...STD,
+    },
+    {
+      id: 'caraz-peen',
+      name: 'Caraz Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Caraz Peen',
+      pricePerSheet: 1150,
+      texture: 'peen',
+      hex: '#9C948A',
+      ...STD,
+    },
+    {
+      id: 'clydeshaw-intrinsic',
+      name: 'Clydeshaw Intrinsic',
+      apiDescription: 'PG Bison Melawood on Chipboard Clydeshaw Intrinsic',
+      pricePerSheet: 1350,
+      texture: 'matt',
+      hex: '#8A7E70',
+      ...STD,
+    },
+    {
+      id: 'congo-peen',
+      name: 'Congo Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Congo Peen',
+      pricePerSheet: 1150,
+      texture: 'peen',
+      hex: '#4A3A30',
+      ...STD,
+    },
+    {
+      id: 'dunblane-grey-peen',
+      name: 'Dunblane Grey Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Dunblane Grey Peen',
+      pricePerSheet: 1150,
+      texture: 'peen',
+      hex: '#7E7E80',
+      ...STD,
+    },
+    {
+      id: 'folkstone-grey-peen',
+      name: 'Folkstone Grey Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Folkstone Grey Peen',
+      pricePerSheet: 1150,
+      texture: 'peen',
+      hex: '#8F8F8C',
+      ...STD,
+    },
+    {
+      id: 'haven-fusion',
+      name: 'Haven Fusion',
+      apiDescription: 'PG Bison Melawood on Chipboard Haven Fusion',
+      pricePerSheet: 1260,
+      texture: 'fusion',
+      hex: '#A9A094',
+      ...STD,
+    },
+    {
+      id: 'kara-blu-peen',
+      name: 'Kara Blu Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Kara Blu Peen',
+      pricePerSheet: 1250,
+      texture: 'peen',
+      hex: '#3E5F8A',
+      ...STD,
+    },
+    {
+      id: 'kirkwall-linear',
+      name: 'Kirkwall Linear',
+      apiDescription: 'PG Bison Melawood on Chipboard Kirkwall Linear',
+      pricePerSheet: 1350,
+      texture: 'linear',
+      hex: '#9C8668',
+      ...STD,
+    },
+    {
+      id: 'lockeport-linear',
+      name: 'Lockeport Linear',
+      apiDescription: 'PG Bison Melawood on Chipboard Lockeport Linear',
+      pricePerSheet: 1260,
+      texture: 'linear',
+      hex: '#A68F6E',
+      ...STD,
+    },
+    {
+      id: 'luca-polenta-fusion',
+      name: 'Luca Polenta Fusion',
+      apiDescription: 'PG Bison Melawood on Chipboard Luca Polenta Fusion',
+      pricePerSheet: 1260,
+      texture: 'fusion',
+      hex: '#B5A48C',
+      ...STD,
+    },
+    {
+      id: 'luca-urban-fusion',
+      name: 'Luca Urban Fusion',
+      apiDescription: 'PG Bison Melawood on Chipboard Luca Urban Fusion',
+      pricePerSheet: 1350,
+      texture: 'fusion',
+      hex: '#8E8C86',
+      ...STD,
+    },
+    {
+      id: 'petrol-blue-peen',
+      name: 'Petrol Blue Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Petrol Blue Peen',
+      pricePerSheet: 1250,
+      texture: 'peen',
+      hex: '#1F4E5F',
+      ...STD,
+    },
+    {
+      id: 'shale-oak-peen',
+      name: 'Shale Oak Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Shale Oak Peen',
+      pricePerSheet: 1260,
+      texture: 'peen',
+      hex: '#7A6B58',
+      ...STD,
+    },
+    {
+      id: 'stonetown-linear',
+      name: 'Stonetown Linear',
+      apiDescription: 'PG Bison Melawood on Chipboard Stonetown Linear',
+      pricePerSheet: 1350,
+      texture: 'linear',
+      hex: '#8B8072',
+      ...STD,
+    },
+    {
+      id: 'super-black-peen',
+      name: 'Super Black Peen',
+      apiDescription: 'PG Bison Melawood on Chipboard Super Black Peen',
+      pricePerSheet: 1250,
+      texture: 'peen',
+      hex: '#111111',
+      ...STD,
+    },
+    {
+      id: 'picco-white',
+      name: 'Picco White',
+      apiDescription: 'PG Bison Picco White Melawood 9x6x16mm',
+      pricePerSheet: 785,
+      texture: 'matt',
+      hex: '#F4F4F2',
+      ...STD,
+    },
+  ]),
   premium: [
+    ...ranged('gloss', [
     {
       id: 'iceland-gloss',
       name: 'Iceland White Gloss',
@@ -352,6 +660,26 @@ export const DOOR_MATERIALS: Record<'value' | 'standard' | 'premium', BoardMater
       ...GLS,
     },
     {
+      id: 'kashmir-gloss',
+      name: 'Kashmir Gloss',
+      apiDescription: 'CHROMETREE GLS  Kashmir 9x6x17',
+      pricePerSheet: 2150,
+      texture: 'gloss',
+      hex: '#C2C0B4',
+      ...GLS,
+    },
+    {
+      id: 'white-linnen-gloss',
+      name: 'White Linnen Gloss',
+      apiDescription: 'CHROMETREE GLS White Linnen 9x6x17 DF',
+      pricePerSheet: 2150,
+      texture: 'gloss',
+      hex: '#F0EBE0',
+      ...GLS,
+    },
+    ]),
+    ...ranged('silktouch', [
+    {
       id: 'iceland-silktouch',
       name: 'Iceland White SilkTouch',
       apiDescription: 'MDF Silktouch Iceland White Ultra Matte 9x6x16',
@@ -369,6 +697,61 @@ export const DOOR_MATERIALS: Record<'value' | 'standard' | 'premium', BoardMater
       hex: '#C2C0B4',
       ...STD,
     },
+    {
+      id: 'black-silktouch',
+      name: 'Black SilkTouch',
+      apiDescription: 'MDF Silktouch Black Ultra Matte 9x6x16',
+      pricePerSheet: 2500,
+      texture: 'super-matte',
+      hex: '#1a1a1a',
+      ...STD,
+    },
+    {
+      id: 'charcoal-silktouch',
+      name: 'Charcoal SilkTouch',
+      apiDescription: 'MDF Silktouch Charcoal Ultra Matte 9x6x16',
+      pricePerSheet: 2500,
+      texture: 'super-matte',
+      hex: '#36454F',
+      ...STD,
+    },
+    {
+      id: 'desert-sky-silktouch',
+      name: 'Desert Sky SilkTouch',
+      apiDescription: 'MDF Silktouch Dessert Sky Ultra Matte 9x6x16',
+      pricePerSheet: 2500,
+      texture: 'super-matte',
+      hex: '#C4B49A',
+      ...STD,
+    },
+    {
+      id: 'moonstone-silktouch',
+      name: 'Moonstone SilkTouch',
+      apiDescription: 'MDF Silktouch MoonStone Ultra Matte Grey 9x6x16',
+      pricePerSheet: 2500,
+      texture: 'super-matte',
+      hex: '#B8B8B8',
+      ...STD,
+    },
+    {
+      id: 'olivia-silktouch',
+      name: 'Olivia SilkTouch',
+      apiDescription: 'MDF Silktouch Olivia Ultra Matte 9x6x16',
+      pricePerSheet: 2500,
+      texture: 'super-matte',
+      hex: '#B8A88A',
+      ...STD,
+    },
+    {
+      id: 'pearl-grey-silktouch',
+      name: 'Pearl Grey SilkTouch',
+      apiDescription: 'MDF Silktouch Pearl Grey Ultra Matte 9x6x16',
+      pricePerSheet: 2500,
+      texture: 'super-matte',
+      hex: '#C0C0C0',
+      ...STD,
+    },
+    ]),
   ],
 }
 
@@ -379,3 +762,18 @@ export function allDoorMaterials(): BoardMaterial[] {
 export function findDoorMaterial(id: string): BoardMaterial | undefined {
   return allDoorMaterials().find(m => m.id === id)
 }
+
+/** Which price tier a material belongs to (range → tier). */
+export function tierForMaterial(id: string): Tier {
+  const m = findDoorMaterial(id)
+  if (!m) return 'standard'
+  return m.range === 'melamine' ? 'value' : m.range === 'melawood' ? 'standard' : 'premium'
+}
+
+/** Retail range metadata for the style step's range tabs. */
+export const RANGES: { id: MaterialRange; label: string; blurb: string; tier: Tier }[] = [
+  { id: 'melamine', label: 'Melamine', blurb: 'standard hinges & runners', tier: 'value' },
+  { id: 'melawood', label: 'Melawood', blurb: 'soft-close throughout', tier: 'standard' },
+  { id: 'gloss', label: 'Gloss', blurb: 'high-gloss doors, under-mount runners', tier: 'premium' },
+  { id: 'silktouch', label: 'SilkTouch', blurb: 'ultra-matte doors, under-mount runners', tier: 'premium' },
+]

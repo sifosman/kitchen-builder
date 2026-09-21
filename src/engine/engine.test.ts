@@ -4,7 +4,7 @@ import { validateLayout } from './rules'
 import { buildBom } from './bom'
 import { priceKitchen, panelAreaMm2 } from './pricing'
 import { freeSpans, type RoomSpec } from './room'
-import { getModule } from '../data/cabinetLibrary'
+import { getModule, moduleIdFor } from '../data/cabinetLibrary'
 import { DOOR_MATERIALS } from '../data/boardMaterials'
 
 function room(overrides: Partial<RoomSpec> = {}): RoomSpec {
@@ -46,8 +46,9 @@ describe('proposeLayouts', () => {
     expect(top.violations).toEqual([])
     const base = top.units.filter(u => u.mounted === 'base')
     const covered = base.reduce((s, u) => s + u.widthMm, 0)
-    // span = 3650 − (900 fridge + 50 vent) = 2700; cabinets+filler cover ≥2550
-    expect(covered).toBeGreaterThanOrEqual(2550)
+    // span = 3650 − (900 fridge + 50 vent) = 2700; exact coverage now that
+    // leftover is absorbed into cut-to-size units instead of mid-run fillers
+    expect(covered).toBe(2700)
     // fridge placed
     expect(top.units.some(u => u.kind === 'fridge')).toBe(true)
   })
@@ -86,6 +87,95 @@ describe('proposeLayouts', () => {
     // nothing on wall B may start before the 610mm dead zone
     const bBase = top.units.filter(u => u.wallId === 'B' && u.mounted === 'base')
     expect(bBase.every(u => u.startMm >= 600)).toBe(true)
+  })
+
+  // default demo room: fridge 0–900, plumbing 1500–2100, hob 2600–3200 on 3650
+  function defaultRoom(): RoomSpec {
+    const r = room()
+    r.walls[0].obstructions = [
+      { id: 'o1', kind: 'fridge', offsetMm: 0, widthMm: 900 },
+      { id: 'o2', kind: 'plumbing', offsetMm: 1500, widthMm: 600 },
+      { id: 'o3', kind: 'hob', offsetMm: 2600, widthMm: 600 },
+    ]
+    return r
+  }
+
+  it('default room: no mid-run fillers, exactly one drawer bank, contiguous cover', () => {
+    const r = defaultRoom()
+    const top = proposeLayouts(r, 3)[0]
+    expect(top.violations).toEqual([])
+
+    const floorRow = top.units
+      .filter(u => u.wallId === 'A' && u.mounted !== 'wall')
+      .sort((a, b) => a.startMm - b.startMm)
+
+    // no filler with soft boundaries on both sides
+    for (const f of floorRow.filter(u => u.kind === 'filler')) {
+      const left = floorRow.find(u => u.startMm + u.widthMm === f.startMm)
+      const right = floorRow.find(u => u.startMm === f.startMm + f.widthMm)
+      const hard = (u?: { kind: string }) => !!u && (u.kind === 'fridge' || u.kind === 'tall')
+      expect(left && right && !hard(left) && !hard(right)).toBeFalsy()
+      expect(f.widthMm).toBeLessThanOrEqual(80)
+    }
+
+    // exactly one drawer bank, sitting between the sink and the oven
+    const drawers = top.units.filter(u => u.kind === 'drawer')
+    expect(drawers).toHaveLength(1)
+    expect(drawers[0].startMm).toBeGreaterThanOrEqual(2100)
+    expect(drawers[0].startMm + drawers[0].widthMm).toBeLessThanOrEqual(2600)
+
+    // contiguous cover 950 → 3650 with no holes
+    let cursor = 950
+    for (const u of floorRow.filter(u => u.startMm >= 950)) {
+      expect(u.startMm).toBe(cursor)
+      cursor = u.startMm + u.widthMm
+    }
+    expect(cursor).toBe(3650)
+  })
+
+  it('default room: wall row fills to the extractor gap exactly', () => {
+    const r = defaultRoom()
+    const top = proposeLayouts(r, 3)[0]
+    const wallRow = top.units
+      .filter(u => u.wallId === 'A' && u.mounted === 'wall')
+      .sort((a, b) => a.startMm - b.startMm)
+
+    for (const f of wallRow.filter(u => u.kind === 'filler')) {
+      const left = wallRow.find(u => u.startMm + u.widthMm === f.startMm)
+      const right = wallRow.find(u => u.startMm === f.startMm + f.widthMm)
+      expect(left && right).toBeFalsy() // no soft-sided filler on the wall row
+    }
+
+    // exact coverage of [900, 2550] ∪ [3250, 3650]
+    const spans: [number, number][] = [[900, 2550], [3250, 3650]]
+    for (const [s, e] of spans) {
+      let cursor = s
+      for (const u of wallRow.filter(u => u.startMm >= s && u.startMm + u.widthMm <= e)) {
+        expect(u.startMm).toBe(cursor)
+        cursor = u.startMm + u.widthMm
+      }
+      expect(cursor).toBe(e)
+    }
+  })
+})
+
+describe('parametric modules', () => {
+  it('getModule builds B575 on the fly with correct panel dims', () => {
+    const m = getModule('B575')
+    expect(m.kind).toBe('base')
+    expect(m.widthMm).toBe(575)
+    expect(m.panels.find(p => p.part === 'Bottom')!.lengthMm).toBe(543) // 575 − 32
+    expect(m.panels.find(p => p.part === 'Door')!.widthMm).toBe(571)    // 575 − 4
+
+    const bom = buildBom([{ instanceId: 'A-1', moduleId: 'B575', wallId: 'A', startMm: 0, widthMm: 575, kind: 'base', mounted: 'base' }])
+    expect(bom.cabinetCount).toBe(1)
+    expect(bom.lines.length).toBeGreaterThan(0)
+  })
+
+  it('rejects out-of-range custom widths', () => {
+    expect(() => getModule('B250')).toThrow()
+    expect(() => getModule('T900')).toThrow()
+    expect(moduleIdFor('drawer', 525)).toBe('D525')
   })
 })
 

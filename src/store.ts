@@ -4,8 +4,8 @@ import type { PlacedUnit } from './engine/rules'
 import { proposeLayouts, type Proposal } from './engine/propose'
 import { buildBom, type Bom } from './engine/bom'
 import { priceKitchen, type PriceBreakdown, type Tier } from './engine/pricing'
-import { DOOR_MATERIALS, findDoorMaterial } from './data/boardMaterials'
-import { CABINET_LIBRARY, getModule } from './data/cabinetLibrary'
+import { DOOR_MATERIALS, findDoorMaterial, tierForMaterial } from './data/boardMaterials'
+import { CABINET_LIBRARY, getModule, moduleIdFor } from './data/cabinetLibrary'
 import type { QuoteResult } from './api/optimizerClient'
 
 export type Step = 'room' | 'layout' | 'style' | 'quote'
@@ -37,6 +37,7 @@ interface KitchenState {
   selectUnit: (id: string | null) => void
   swapUnitModule: (instanceId: string, moduleId: string) => void
   nudgeUnit: (instanceId: string, deltaMm: number) => void
+  setUnitWidth: (instanceId: string, widthMm: number) => void
   removeUnit: (instanceId: string) => void
   addUnit: (moduleId: string, wallId: string) => void
   setTier: (t: Tier) => void
@@ -139,6 +140,19 @@ export const useStore = create<KitchenState>((set, get) => ({
     set({ units: next, bom, estimate })
   },
 
+  setUnitWidth: (instanceId, widthMm) => {
+    const { units } = get()
+    const next = units.map(u => {
+      if (u.instanceId !== instanceId) return u
+      if (!['base', 'drawer', 'wall', 'tall'].includes(u.kind)) return u
+      const moduleId = moduleIdFor(u.kind as 'base' | 'drawer' | 'wall' | 'tall', widthMm)
+      const m = getModule(moduleId)
+      return { ...u, moduleId, widthMm: m.widthMm }
+    })
+    const { bom, estimate } = recalc(next, get().tier, get().doorMaterialId)
+    set({ units: next, bom, estimate })
+  },
+
   removeUnit: instanceId => {
     const next = get().units.filter(u => u.instanceId !== instanceId)
     const { bom, estimate } = recalc(next, get().tier, get().doorMaterialId)
@@ -182,9 +196,10 @@ export const useStore = create<KitchenState>((set, get) => ({
   },
 
   setDoorMaterial: id => {
-    const { units, tier } = get()
+    const { units } = get()
+    const tier = tierForMaterial(id)
     const { bom, estimate } = recalc(units, tier, id)
-    set({ doorMaterialId: id, bom, estimate })
+    set({ doorMaterialId: id, tier, bom, estimate })
   },
 
   setCustomer: c => set({ customer: { ...get().customer, ...c } }),

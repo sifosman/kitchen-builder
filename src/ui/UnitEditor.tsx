@@ -17,7 +17,7 @@ const KIND_GROUPS: Record<string, string[]> = {
 }
 
 export default function UnitEditor() {
-  const { units, selectedUnitId, selectUnit, swapUnitModule, nudgeUnit, removeUnit, room } = useStore()
+  const { units, selectedUnitId, selectUnit, swapUnitModule, nudgeUnit, removeUnit, room, setUnitWidth } = useStore()
   const unit = units.find(u => u.instanceId === selectedUnitId)
   const violations = validateLayout(units, room)
 
@@ -44,6 +44,24 @@ export default function UnitEditor() {
               ))}
             </select>
           </div>
+          {['base', 'drawer', 'wall', 'tall'].includes(unit.kind) && (
+            <div>
+              <label className="hds-label">Width (mm)</label>
+              <input
+                type="number"
+                step={10}
+                min={unit.kind === 'tall' ? 300 : 300}
+                max={unit.kind === 'tall' ? 600 : 1000}
+                value={unit.widthMm}
+                onChange={e => {
+                  const w = Number(e.target.value)
+                  const max = unit.kind === 'tall' ? 600 : 1000
+                  if (w >= 300 && w <= max) setUnitWidth(unit.instanceId, w)
+                }}
+                className="hds-input"
+              />
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             <span className="mr-1 text-xs text-hds-muted">Move</span>
             {[-100, -50, 50, 100].map(d => (
