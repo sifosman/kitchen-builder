@@ -127,6 +127,14 @@ function bandIntervals(
       else if (o.kind === 'fridge' && kind !== 'fridge') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
       else if (o.kind === 'dishwasher' && kind !== 'dishwasher') blocks.push({ s: o.offsetMm, e: o.offsetMm + o.widthMm })
     }
+    // full-height floor units (tall, fridge) physically collide with wall
+    // units hanging overhead — they may only go where the wall run is clear
+    if (kind === 'tall' || kind === 'fridge') {
+      for (const u of units) {
+        if (u.wallId !== wallId || u.mounted !== 'wall') continue
+        blocks.push({ s: u.startMm, e: u.startMm + u.widthMm })
+      }
+    }
   }
   for (const b of blocks) {
     spans = spans.flatMap(sp => {

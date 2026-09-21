@@ -150,14 +150,20 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
   const clampFloor = (start: number, w: number) =>
     Math.min(Math.max(start, deadBase), Math.max(deadBase, wall.lengthMm - w))
   // footprints of fixed units already placed — a later appliance whose marked
-  // zone overlaps a placed unit slides right past it instead of colliding
+  // zone overlaps a placed unit takes the nearest free slot beside it instead
+  // of colliding (right of it if possible, else left, else flag via validator)
   const claimed: Zone[] = []
+  const fits = (s: number, w: number) =>
+    s >= deadBase && s + w <= wall.lengthMm && !claimed.some(c => s < c.e && c.s < s + w)
   const resolveStart = (start: number, w: number): number => {
-    let s = start
-    for (const c of [...claimed].sort((a, b) => a.s - b.s)) {
-      if (s < c.e && c.s < s + w) s = c.e
+    if (fits(start, w)) return start
+    const cands = new Set<number>([deadBase])
+    for (const c of claimed) {
+      cands.add(c.e)
+      cands.add(c.s - w)
     }
-    return s
+    const valid = [...cands].filter(s => fits(s, w)).sort((a, b) => Math.abs(a - start) - Math.abs(b - start))
+    return valid[0] ?? start
   }
 
   const pendingDishwashers: Array<{ offsetMm: number; widthMm: number }> = []
@@ -194,7 +200,7 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
         const start = clampFloor(Math.min(wall.lengthMm - w, s + (o.widthMm - w) / 2), w)
         // oven unit itself stays 600 — centred inside wider zones, but never
         // inside another fixed unit's footprint
-        const unitStart = Math.min(resolveStart(start + Math.max(0, (w - 600) / 2), 600), Math.max(deadBase, wall.lengthMm - 600))
+        const unitStart = resolveStart(start + Math.max(0, (w - 600) / 2), 600)
         const u = unit('OVEN600', wall.id, unitStart, 600, 'oven')
         fixed.push(u)
         claimed.push({ s: u.startMm, e: u.startMm + u.widthMm })
@@ -235,12 +241,12 @@ function planWall(wall: Wall, wallIndex: number, room: RoomSpec): WallPlan {
       start = clampFloor(Math.min(wall.lengthMm - w, dw.offsetMm), w)
       if (mergeZones(occupied).some(z => start! < z.e && z.s < start! + w)) continue // can't place
     }
-    const unitStart = start + Math.max(0, (w - 600) / 2)
+    const unitStart = resolveStart(start + Math.max(0, (w - 600) / 2), 600)
     const dwUnit = unit('DW600', wall.id, unitStart, 600, 'dishwasher')
     fixed.push(dwUnit)
     claimed.push({ s: dwUnit.startMm, e: dwUnit.startMm + dwUnit.widthMm })
-    occupied.push({ s: start, e: start + w, hard: false })
-    wallOccupied.push({ s: start, e: start + w, hard: false })
+    occupied.push({ s: start, e: Math.max(start + w, dwUnit.startMm + dwUnit.widthMm), hard: false })
+    wallOccupied.push({ s: start, e: Math.max(start + w, dwUnit.startMm + dwUnit.widthMm), hard: false })
   }
 
   const merged = mergeZones(occupied)

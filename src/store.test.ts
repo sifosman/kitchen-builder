@@ -60,6 +60,26 @@ describe('manual edit clamping', () => {
     }
   })
 
+  it('a tall unit can never be added under a wall unit', () => {
+    // default layout already has wall units; a T600 must land in a clear stretch
+    useStore.getState().addUnit('T600', 'A')
+    const tall = useStore.getState().units.find(u => u.kind === 'tall')
+    if (tall) {
+      for (const w of useStore.getState().units.filter(u => u.mounted === 'wall' && u.wallId === 'A')) {
+        expect(tall.startMm >= w.startMm + w.widthMm || tall.startMm + tall.widthMm <= w.startMm).toBe(true)
+      }
+    }
+    // and nudging a tall unit can't slide it under the wall run either
+    if (tall) {
+      for (let i = 0; i < 40; i++) useStore.getState().nudgeUnit(tall.instanceId, 100)
+      for (let i = 0; i < 40; i++) useStore.getState().nudgeUnit(tall.instanceId, -100)
+      const moved = useStore.getState().units.find(u => u.instanceId === tall.instanceId)!
+      for (const w of useStore.getState().units.filter(u => u.mounted === 'wall' && u.wallId === 'A')) {
+        expect(moved.startMm >= w.startMm + w.widthMm || moved.startMm + moved.widthMm <= w.startMm).toBe(true)
+      }
+    }
+  })
+
   it('addUnit never lands inside a door zone', () => {
     useStore.getState().resetDesign()
     useStore.getState().setRoom({
